@@ -1,0 +1,30 @@
+package mapreduce:typeimpls;
+
+interface logging {
+  log: func(msg: string);
+}
+
+world reader {
+  import logging;
+
+  export read-fn: func(key: string) -> list<u8>;
+}
+
+world mapper {
+  import logging;
+
+  import emit: func(key: string, value: list<u8>);
+  export map-fn: func(key: string, value: list<u8>);
+}
+
+world reducer {
+  import logging;
+  
+  export reduce-fn: func(key: string, value: list<u8>, acc: list<u8>) -> list<u8>;
+}
+
+world partitioner {
+  import logging;
+
+  export partition-fn: func(key: string, r: u32) -> string;
+}

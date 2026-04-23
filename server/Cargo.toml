@@ -1,0 +1,23 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "mapreduce"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mapreduce_bin"
+path = "src/main.rs"
+
+[dependencies]
+wasmtime = { workspace = true}
+wasmtime-wasi = { workspace = true }
+anyhow = { workspace = true}
+futures = { workspace = true}
+tarpc = { workspace = true}
+tokio = { workspace = true}
+serde = { workspace = true }
+serde_bytes = { workspace = true }
+postcard = { workspace = true }
