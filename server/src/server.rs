@@ -1,12 +1,9 @@
-use std::rc::Rc;
-
-use tarpc::context;
-use wasmtime::{Engine, Store};
-
 use crate::{
     cluster::ClusterConfig,
-    map::{MapRequest, perform_map}, wasm::{DefaultWasmEnv, WasmEnv, handles::Map},
+    map::MapRequest,
+    wasm::{WasmEnv, handles::Map},
 };
+use tarpc::context;
 
 #[tarpc::service]
 pub trait MapReduceService {
@@ -25,18 +22,18 @@ pub trait MapReduceService {
 
 #[derive(Clone)]
 pub struct MapReduceServer<W: WasmEnv> {
-    cluster: ClusterConfig,
-    wasm_env: W
+    _cluster: ClusterConfig,
+    wasm_env: W,
 }
 
 impl<W: WasmEnv> MapReduceServer<W> {
     pub fn new() -> Self {
         let wasm_env = W::new().unwrap();
         Self {
-            cluster: ClusterConfig {
+            _cluster: ClusterConfig {
                 instances: Vec::new(),
             },
-            wasm_env
+            wasm_env,
         }
     }
 }
@@ -48,18 +45,24 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
     }
 
     async fn map(mut self, _: context::Context, mp: MapRequest) -> () {
-        
         //let _ = perform_map(mp);
         let map_binary = mp.map_src.bytes().collect::<Vec<u8>>();
 
         // We have to create the environment in the thread that builds and
         // executes the wasm code. wasmtime constructs do not mostly implement `Send`
 
-        let mut mapper = self.wasm_env.load_map_binary(map_binary.as_slice()).unwrap();
+        let mut mapper = self
+            .wasm_env
+            .load_map_binary(map_binary.as_slice())
+            .unwrap();
         let r = mapper.map("key 1", &[0x00]);
         match r {
-            Ok(_) => { println!("Ran successfully"); }
-            Err(e) => { println!("Error encountered: {}", e); }
+            Ok(_) => {
+                println!("Ran successfully");
+            }
+            Err(e) => {
+                println!("Error encountered: {}", e);
+            }
         }
     }
 

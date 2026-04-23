@@ -1,7 +1,4 @@
-
-pub struct PromoteRequest {
-
-}
+pub struct PromoteRequest {}
 
 pub fn run_promote() {
     // get the binary for the components
@@ -13,7 +10,7 @@ pub fn run_promote() {
     // start a thread to monitor their health
 
     // split the input keys into M portions
-    // create map job requests and send them 
+    // create map job requests and send them
 
     // wait until all map jobs have been fulfilled
     // now we should have all the locations of processed, partitioned data
@@ -22,5 +19,4 @@ pub fn run_promote() {
     // of the partition's data
 
     // if a worker fails, recompute any map jobs done on it
-
 }

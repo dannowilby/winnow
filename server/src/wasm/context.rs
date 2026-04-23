@@ -1,8 +1,8 @@
 use wasmtime::component::HasData;
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxView, WasiView};
 
-use crate::wasm::mapper::mapreduce::typeimpls::{logging::Host};
 use crate::wasm::mapper::MapperImports;
+use crate::wasm::mapper::mapreduce::typeimpls::logging::Host;
 
 pub struct HostAPI {
     pub wasi_ctx: WasiCtx,
@@ -17,7 +17,7 @@ impl Host for HostAPI {
 
 impl MapperImports for HostAPI {
     fn emit(&mut self, key: String, value: Vec<u8>) {
-        println!("Emitting: {}", key);
+        println!("Emitting: {}, size={}", key, value.len());
     }
 }
 

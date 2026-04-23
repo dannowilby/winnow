@@ -15,9 +15,7 @@ pub fn perform_map(mp: MapRequest) -> Result<()> {
     // get R, the number of partitions here too
     // Ideally, the map and partition functions will be passed here as well
 
-    
-    
-    for k in mp.key_range {
+    for _k in mp.key_range {
         // read the data for k
         // run the map function on k,v
         // buffer/write the results

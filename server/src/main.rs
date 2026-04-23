@@ -1,9 +1,9 @@
 use anyhow::Result;
 use futures::prelude::*;
 use mapreduce::{
-    cluster::ClusterConfig,
     map::MapRequest,
-    server::{MapReduceServer, MapReduceService, MapReduceServiceClient}, wasm::DefaultWasmEnv,
+    server::{MapReduceServer, MapReduceService, MapReduceServiceClient},
+    wasm::DefaultWasmEnv,
 };
 use tarpc::{
     client, context,

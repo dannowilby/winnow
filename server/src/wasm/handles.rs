@@ -3,7 +3,9 @@
 
 use wasmtime::Store;
 
-use crate::wasm::{context::HostAPI, mapper::Mapper, partitioner::Partitioner, reader::Reader, reducer::Reducer};
+use crate::wasm::{
+    context::HostAPI, mapper::Mapper, partitioner::Partitioner, reader::Reader, reducer::Reducer,
+};
 
 pub trait Partition {
     fn partition(&mut self, key: &str, r: u32) -> Result<String, wasmtime::error::Error>;
@@ -14,7 +16,12 @@ pub trait Map {
 }
 
 pub trait Reduce {
-    fn reduce(&mut self, key: &str, value: &[u8], acc: &[u8]) -> Result<Vec<u8>, wasmtime::error::Error>;
+    fn reduce(
+        &mut self,
+        key: &str,
+        value: &[u8],
+        acc: &[u8],
+    ) -> Result<Vec<u8>, wasmtime::error::Error>;
 }
 
 pub trait Read {
@@ -23,18 +30,18 @@ pub trait Read {
 
 pub struct PartitionHandle {
     pub store: Store<HostAPI>,
-    pub partitioner: Partitioner
+    pub partitioner: Partitioner,
 }
 
 impl Partition for PartitionHandle {
-        fn partition(&mut self, key: &str, r: u32) -> Result<String, wasmtime::error::Error> {
-            (&self.partitioner).call_partition_fn(&mut self.store, key, r)
-        }
+    fn partition(&mut self, key: &str, r: u32) -> Result<String, wasmtime::error::Error> {
+        (&self.partitioner).call_partition_fn(&mut self.store, key, r)
+    }
 }
 
 pub struct MapHandle {
     pub store: Store<HostAPI>,
-    pub mapper: Mapper
+    pub mapper: Mapper,
 }
 
 impl Map for MapHandle {
@@ -45,18 +52,23 @@ impl Map for MapHandle {
 
 pub struct ReduceHandle {
     pub store: Store<HostAPI>,
-    pub reducer: Reducer
+    pub reducer: Reducer,
 }
 
 impl Reduce for ReduceHandle {
-    fn reduce(&mut self, key: &str, value: &[u8], acc: &[u8]) -> Result<Vec<u8>, wasmtime::error::Error> {
+    fn reduce(
+        &mut self,
+        key: &str,
+        value: &[u8],
+        acc: &[u8],
+    ) -> Result<Vec<u8>, wasmtime::error::Error> {
         (&self.reducer).call_reduce_fn(&mut self.store, key, value, acc)
     }
 }
 
 pub struct ReadHandle {
     pub store: Store<HostAPI>,
-    pub reader: Reader
+    pub reader: Reader,
 }
 
 impl Read for ReadHandle {
