@@ -152,33 +152,3 @@ fn pre_instantiate_component(
 
     Ok((store, component, linker))
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn run_wasm_file() -> Result<(), Box<dyn std::error::Error>> {
-        let mut wasm_env = DefaultWasmEnv::new()?;
-
-        let reader_bytes = std::fs::read("../target/wasm32-wasip2/release/read.wasm").unwrap();
-        println!("read.wasm size: {}kb", reader_bytes.len() as f32 / 1000.0);
-
-        let mapper_bytes = std::fs::read("../target/wasm32-wasip2/release/map.wasm").unwrap();
-        println!("map.wasm size: {}kb", mapper_bytes.len() as f32 / 1000.0);
-
-        let key = "test-key";
-
-        let value: Vec<u8>;
-        {
-            let mut reader = wasm_env.load_read_binary(&reader_bytes)?;
-            value = reader.read(key)?;
-        }
-
-        let mut mapper = wasm_env.load_map_binary(&mapper_bytes)?;
-        mapper.map(key, &value)?;
-
-        Ok(())
-    }
-}

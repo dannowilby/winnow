@@ -15,7 +15,7 @@ impl Guest for MapperComponent {
         log(&format!("Hello there from inside mapper! {}, {}", key, x.0));
         emit(&key, &to_allocvec(&Temp(x.0 + 3)).unwrap());
 
-        return vec!["seen-partition-1".to_owned()];
+        vec!["seen-partition-1".to_owned()]
     }
 }
 

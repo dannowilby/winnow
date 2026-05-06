@@ -58,6 +58,6 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
     }
 
     async fn download(self, _: context::Context, _file: String) -> Vec<u8> {
-        return vec![0x00];
+        vec![0x00]
     }
 }

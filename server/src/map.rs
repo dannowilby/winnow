@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tarpc::context;
-use tokio::time::Instant;
 
 use crate::{
-    cluster::{ClusterConn, Conn, Host},
+    cluster::ClusterConn,
     wasm::{WasmEnv, handle::read::ReadFn},
 };
 
@@ -28,7 +25,7 @@ pub struct MapResponse {
 }
 
 pub async fn handle_map<W: WasmEnv>(
-    cluster: Arc<ClusterConn>,
+    _cluster: Arc<ClusterConn>,
     wasm_env: W,
     mp: MapRequest,
 ) -> MapResponse {

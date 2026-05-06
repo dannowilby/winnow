@@ -1,13 +1,12 @@
-use dashmap::DashMap;
-use futures::{StreamExt, future::join_all, stream::FuturesUnordered};
+use futures::{StreamExt, stream::FuturesUnordered};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::Arc,
     time::Duration,
 };
 use std::{future::Future, pin::Pin};
-use tarpc::{client, context, tokio_serde::formats::Json};
+use tarpc::context;
 use tokio::time::{sleep, timeout};
 
 use crate::{
@@ -45,7 +44,7 @@ pub enum LeaderEvent {
 
 pub async fn handle_promote<W: WasmEnv>(
     cluster: Arc<ClusterConn>,
-    wasm_env: W,
+    _wasm_env: W,
     pr: PromoteRequest,
 ) {
     let mut events: FuturesUnordered<Pin<Box<dyn Future<Output = LeaderEvent> + Send>>> =
@@ -90,7 +89,7 @@ pub async fn handle_promote<W: WasmEnv>(
                         .or_insert(vec![host.clone()]);
                 }
 
-                completed_map_jobs = completed_map_jobs + 1;
+                completed_map_jobs += 1;
 
                 if completed_map_jobs < pr.m {
                     continue;
@@ -115,7 +114,7 @@ pub async fn handle_promote<W: WasmEnv>(
             }
             LeaderEvent::ReduceComplete(partition, host) => {
                 println!("Reduced partition {} on {}.", partition, host.key());
-                completed_reduce_jobs = completed_reduce_jobs + 1;
+                completed_reduce_jobs += 1;
 
                 if completed_reduce_jobs >= total_reduce_jobs {
                     println!("Should be finishing job now.");
@@ -139,7 +138,7 @@ pub async fn handle_promote<W: WasmEnv>(
     //   - if it had a map job, rerun it and all downstream reduce dependents
     //   - if it had a reduce job, just rerun it
 
-    ()
+    
 }
 
 async fn heartbeat(conn: Conn) -> LeaderEvent {
@@ -161,7 +160,7 @@ async fn map_request(conn: Conn, mp: MapRequest) -> LeaderEvent {
         Ok(mr) => LeaderEvent::MapComplete(mr, conn.0),
         Err(e) => {
             eprintln!("{}", e);
-            return LeaderEvent::MachineFailure(conn.0);
+            LeaderEvent::MachineFailure(conn.0)
         }
     }
 }
@@ -173,23 +172,18 @@ async fn reduce_request(conn: Conn, rr: ReduceRequest) -> LeaderEvent {
         Ok(_) => LeaderEvent::ReduceComplete(partition, conn.0),
         Err(e) => {
             eprintln!("{}", e);
-            return LeaderEvent::MachineFailure(conn.0);
+            LeaderEvent::MachineFailure(conn.0)
         }
     }
 }
 
-pub fn splits_size(m: u32, key_list: &Vec<String>) -> usize {
+pub fn split_input(
+    m: u32,
+    key_list: &[String],
+) -> impl Iterator<Item = (usize, &[String])> {
+    
     let n = key_list.len();
     let segments = n.div_ceil(m as usize);
-
-    return segments;
-}
-
-pub fn split_input<'a>(
-    m: u32,
-    key_list: &'a Vec<String>,
-) -> impl Iterator<Item = (usize, &'a [String])> {
-    let segments = splits_size(m, key_list);
 
     key_list.chunks(segments).enumerate()
 }

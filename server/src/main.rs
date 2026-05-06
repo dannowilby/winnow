@@ -2,16 +2,11 @@ use anyhow::Result;
 use futures::prelude::*;
 use mapreduce::{
     cluster::ClusterList,
-    map::MapRequest,
-    server::{MapReduceServer, MapReduceService, MapReduceServiceClient},
+    server::{MapReduceServer, MapReduceService},
     wasm::DefaultWasmEnv,
 };
-use std::{
-    net::{IpAddr, Ipv6Addr},
-    sync::Arc,
-};
+use std::net::{IpAddr, Ipv6Addr};
 use tarpc::server::{self, Channel, incoming::Incoming};
-use tokio::task::JoinHandle;
 
 async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
     tokio::spawn(fut);

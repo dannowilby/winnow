@@ -82,7 +82,7 @@ impl ClusterList {
 
 impl ClusterConn {
     /// Helper method to make spreading initial jobs to machines easy.
-    pub fn get_modulo<'a>(&'a self, index: usize) -> &'a Conn {
+    pub fn get_modulo(&self, index: usize) -> &Conn {
         let n = self.members.len();
 
         self.members.get(index % n).expect("Cluster internal lookup: index % n has failed to retrieve an instance! Seriously wrong!")
