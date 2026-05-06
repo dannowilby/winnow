@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use crate::{
-    cluster::ClusterConfig,
-    map::MapRequest,
-    wasm::{WasmEnv, handles::Map},
+    cluster::ClusterConn,
+    map::{MapRequest, MapResponse, handle_map},
+    promote::{PromoteRequest, handle_promote},
+    reduce::{ReduceRequest, handle_reduce},
+    wasm::WasmEnv,
 };
 use tarpc::context;
 
@@ -10,29 +14,26 @@ pub trait MapReduceService {
     /// Returns true if healthy, false otherwise.
     async fn heartbeat() -> bool;
 
-    async fn map(mp: MapRequest) -> ();
+    async fn map(mp: MapRequest) -> MapResponse;
 
-    async fn reduce() -> ();
+    async fn reduce(rr: ReduceRequest) -> ();
 
-    async fn promote() -> ();
+    async fn promote(pr: PromoteRequest) -> ();
 
-    /// `notify` provides an endpoints for finishing map/reduce tasks to send their parsed data to
-    async fn notify() -> ();
+    async fn download(file: String) -> Vec<u8>;
 }
 
 #[derive(Clone)]
 pub struct MapReduceServer<W: WasmEnv> {
-    _cluster: ClusterConfig,
+    cluster: Arc<ClusterConn>,
     wasm_env: W,
 }
 
 impl<W: WasmEnv> MapReduceServer<W> {
-    pub fn new() -> Self {
+    pub fn new(cluster: ClusterConn) -> Self {
         let wasm_env = W::new().unwrap();
         Self {
-            _cluster: ClusterConfig {
-                instances: Vec::new(),
-            },
+            cluster: Arc::new(cluster),
             wasm_env,
         }
     }
@@ -44,44 +45,19 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
         true
     }
 
-    async fn map(mut self, _: context::Context, mp: MapRequest) -> () {
-        //let _ = perform_map(mp);
-        let map_binary = mp.map_src.bytes().collect::<Vec<u8>>();
-
-        // We have to create the environment in the thread that builds and
-        // executes the wasm code. wasmtime constructs do not mostly implement `Send`
-
-        let mut mapper = self
-            .wasm_env
-            .load_map_binary(map_binary.as_slice())
-            .unwrap();
-        let r = mapper.map("key 1", &[0x00]);
-        match r {
-            Ok(_) => {
-                println!("Ran successfully");
-            }
-            Err(e) => {
-                println!("Error encountered: {}", e);
-            }
-        }
+    async fn map(self, _: context::Context, mp: MapRequest) -> MapResponse {
+        handle_map(self.cluster.clone(), self.wasm_env.clone(), mp).await
     }
 
-    async fn reduce(self, _: context::Context) -> () {
-
-        // get the locations of all the data
-        // get the reduce function
-        // get a sort function
-
-        // download the data
-        // sort the data
-
-        // iterate over the data with kv pairs and calculate the final result
-
-        // write the final result
-        // send a message to master indicating that the reduce task has finished
+    async fn reduce(self, _: context::Context, _rr: ReduceRequest) -> () {
+        handle_reduce().await
     }
 
-    async fn promote(self, _: context::Context) -> () {}
+    async fn promote(self, _: context::Context, pr: PromoteRequest) -> () {
+        handle_promote(self.cluster.clone(), self.wasm_env.clone(), pr).await;
+    }
 
-    async fn notify(self, _: context::Context) -> () {}
+    async fn download(self, _: context::Context, _file: String) -> Vec<u8> {
+        return vec![0x00];
+    }
 }

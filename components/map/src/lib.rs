@@ -10,10 +10,12 @@ use mapreduce::typeimpls::logging::log;
 struct MapperComponent;
 
 impl Guest for MapperComponent {
-    fn map_fn(key: String, value: Vec<u8>) {
+    fn map_fn(key: String, value: Vec<u8>) -> Vec<String> {
         let x: Temp = from_bytes(&value).unwrap();
         log(&format!("Hello there from inside mapper! {}, {}", key, x.0));
         emit(&key, &to_allocvec(&Temp(x.0 + 3)).unwrap());
+
+        return vec!["seen-partition-1".to_owned()];
     }
 }
 

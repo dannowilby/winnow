@@ -1,9 +1,16 @@
 mod context;
-pub mod handles;
+pub mod handle;
+
+use std::collections::HashSet;
 
 use crate::wasm::{
     context::{ExtensionData, HostAPI},
-    handles::{Map, MapHandle, Partition, PartitionHandle, Read, ReadHandle, Reduce, ReduceHandle},
+    handle::{
+        map::{MapFn, MapHandle},
+        partition::{PartitionFn, PartitionHandle},
+        read::{ReadFn, ReadHandle},
+        reduce::{ReduceFn, ReduceHandle},
+    },
 };
 use wasmtime::{
     Config, Engine, Store,
@@ -48,16 +55,16 @@ use partitioner::Partitioner;
 use reader::Reader;
 use reducer::Reducer;
 
-pub trait WasmEnv: Clone {
+pub trait WasmEnv: Clone + Send + Sync + 'static {
     fn new() -> Result<Self, Box<dyn std::error::Error>>;
 
     fn load_partition_binary(
-        &mut self,
+        &self,
         binary: &[u8],
-    ) -> Result<impl Partition, wasmtime::error::Error>;
-    fn load_map_binary(&mut self, binary: &[u8]) -> Result<impl Map, wasmtime::error::Error>;
-    fn load_reduce_binary(&mut self, binary: &[u8]) -> Result<impl Reduce, wasmtime::error::Error>;
-    fn load_read_binary(&mut self, binary: &[u8]) -> Result<impl Read, wasmtime::error::Error>;
+    ) -> Result<impl PartitionFn, wasmtime::error::Error>;
+    fn load_map_binary(&self, binary: &[u8]) -> Result<impl MapFn, wasmtime::error::Error>;
+    fn load_reduce_binary(&self, binary: &[u8]) -> Result<impl ReduceFn, wasmtime::error::Error>;
+    fn load_read_binary(&self, binary: &[u8]) -> Result<impl ReadFn, wasmtime::error::Error>;
 }
 
 #[derive(Clone)]
@@ -72,7 +79,7 @@ impl WasmEnv for DefaultWasmEnv {
         Ok(Self { engine })
     }
 
-    fn load_map_binary(&mut self, binary: &[u8]) -> Result<impl Map, wasmtime::error::Error> {
+    fn load_map_binary(&self, binary: &[u8]) -> Result<impl MapFn, wasmtime::error::Error> {
         let (mut store, component, linker) = pre_instantiate_component(&self.engine, binary)?;
 
         let mapper = Mapper::instantiate(&mut store, &component, &linker)?;
@@ -80,7 +87,7 @@ impl WasmEnv for DefaultWasmEnv {
         Ok(MapHandle { store, mapper })
     }
 
-    fn load_reduce_binary(&mut self, binary: &[u8]) -> Result<impl Reduce, wasmtime::error::Error> {
+    fn load_reduce_binary(&self, binary: &[u8]) -> Result<impl ReduceFn, wasmtime::error::Error> {
         let (mut store, component, linker) = pre_instantiate_component(&self.engine, binary)?;
 
         let reducer = Reducer::instantiate(&mut store, &component, &linker)?;
@@ -89,9 +96,9 @@ impl WasmEnv for DefaultWasmEnv {
     }
 
     fn load_partition_binary(
-        &mut self,
+        &self,
         binary: &[u8],
-    ) -> Result<impl Partition, wasmtime::error::Error> {
+    ) -> Result<impl PartitionFn, wasmtime::error::Error> {
         let (mut store, component, linker) = pre_instantiate_component(&self.engine, binary)?;
 
         let partitioner = Partitioner::instantiate(&mut store, &component, &linker)?;
@@ -99,7 +106,7 @@ impl WasmEnv for DefaultWasmEnv {
         Ok(PartitionHandle { store, partitioner })
     }
 
-    fn load_read_binary(&mut self, binary: &[u8]) -> Result<impl Read, wasmtime::error::Error> {
+    fn load_read_binary(&self, binary: &[u8]) -> Result<impl ReadFn, wasmtime::error::Error> {
         let (mut store, component, linker) = pre_instantiate_component(&self.engine, binary)?;
 
         let reader = Reader::instantiate(&mut store, &component, &linker)?;
@@ -114,9 +121,9 @@ fn pre_instantiate_component(
     engine: &Engine,
     binary: &[u8],
 ) -> Result<(Store<HostAPI>, Component, Linker<HostAPI>), wasmtime::error::Error> {
-    let component = Component::new(&engine, binary)?;
+    let component = Component::new(engine, binary)?;
 
-    let mut linker: Linker<HostAPI> = Linker::new(&engine);
+    let mut linker: Linker<HostAPI> = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
 
     // Currently we just use the mapper's defined imports to link all of the
@@ -135,10 +142,11 @@ fn pre_instantiate_component(
         .build();
 
     let store = Store::new(
-        &engine,
+        engine,
         HostAPI {
             wasi_ctx,
             resource_table: ResourceTable::new(),
+            locations: HashSet::new(),
         },
     );
 
@@ -149,8 +157,6 @@ fn pre_instantiate_component(
 mod tests {
 
     use super::*;
-
-    use crate::wasm::handles::Map;
 
     #[test]
     fn run_wasm_file() -> Result<(), Box<dyn std::error::Error>> {

@@ -3,15 +3,19 @@
 # build the server and wasm binaries in release mode
 build:
     cargo build -p server --release
-    cargo build -p mapper --target=wasm32-wasip2 --release
 
 # build the server and wasm binaries
 dev-build:
     cargo build -p server
-    cargo build -p read --target=wasm32-wasip2 --release
+
+cli: dev-build
+    cargo run -p server --bin mapreduce_cli
+
+build-components:
     cargo build -p map --target=wasm32-wasip2 --release
-    cargo build -p partition --target=wasm32-wasip2 --release
-    cargo build -p reduce --target=wasm32-wasip2 --release
+
+server: dev-build
+    cargo run -p server --bin mapreduce_bin
 
 test: dev-build
     cargo test -p server -- --no-capture

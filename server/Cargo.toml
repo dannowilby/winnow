@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "mapreduce_bin"
 path = "src/main.rs"
 
+[[bin]]
+name = "mapreduce_cli"
+path = "src/cli.rs"
+
 [dependencies]
 wasmtime = { workspace = true}
 wasmtime-wasi = { workspace = true }
@@ -21,3 +25,4 @@ tokio = { workspace = true}
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 postcard = { workspace = true }
+dashmap = { workspace = true }

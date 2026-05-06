@@ -1,3 +1,5 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use wit_bindgen::generate;
 
 generate!("partitioner" in "../../wit/world.wit");
@@ -8,9 +10,13 @@ struct PartitionerComponent;
 
 impl Guest for PartitionerComponent {
     fn partition_fn(key: String, r: u32) -> String {
-        // let t = unsafe { std::mem::transmute::<&[u8], u32>(&value) };
+        let mut dh = DefaultHasher::new();
+        key.hash(&mut dh);
+        let t = dh.finish() as u32;
+        
         log(&key);
-        format!("test-partition-{}", r)
+        
+        format!("p-{}", t % r)
     }
 }
 
