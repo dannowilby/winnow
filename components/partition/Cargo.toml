@@ -10,6 +10,6 @@ crate-type = ["cdylib"]
 common = { path = "../common" }
 wit-bindgen = { workspace = true}
 serde = { workspace = true }
-postcard = {workspace = true}
+
 dlmalloc = {workspace = true}
 

@@ -1,7 +1,4 @@
-use postcard::{from_bytes, to_allocvec};
 use wit_bindgen::generate;
-
-use common::Temp;
 
 generate!("mapper" in "../../wit/world.wit");
 
@@ -10,12 +7,21 @@ use mapreduce::typeimpls::logging::log;
 struct MapperComponent;
 
 impl Guest for MapperComponent {
-    fn map_fn(key: String, value: Vec<u8>) -> Vec<String> {
-        let x: Temp = from_bytes(&value).unwrap();
-        log(&format!("Hello there from inside mapper! {}, {}", key, x.0));
-        emit(&key, &to_allocvec(&Temp(x.0 + 3)).unwrap());
+    fn map_fn(key: String, value: Vec<u8>) -> Vec<(String, Vec<u8>)> {
+        log(&format!("Mapping key: {}", &key));
 
-        vec!["seen-partition-1".to_owned()]
+        let v: Vec<i32> = rmp_serde::from_slice(&value).expect("should be able to parse read data");
+        let mut output = Vec::new();
+
+        for x in v {
+            if x % 2 == 0 {
+                output.push(("even".to_owned(), rmp_serde::to_vec(&x).expect("s1")));
+            } else {
+                output.push(("odd".to_owned(), rmp_serde::to_vec(&x).expect("s2")));
+            }
+        }
+
+        output
     }
 }
 

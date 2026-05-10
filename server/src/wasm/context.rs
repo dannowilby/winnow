@@ -3,25 +3,16 @@ use std::collections::HashSet;
 use wasmtime::component::HasData;
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxView, WasiView};
 
-use crate::wasm::mapper::MapperImports;
 use crate::wasm::mapper::mapreduce::typeimpls::logging::Host;
 
 pub struct HostAPI {
     pub wasi_ctx: WasiCtx,
     pub resource_table: ResourceTable,
-    pub locations: HashSet<String>,
 }
 
 impl Host for HostAPI {
     fn log(&mut self, msg: String) {
         println!("[Guest] {}", msg);
-    }
-}
-
-impl MapperImports for HostAPI {
-    /// Should write to the file system, partitioning as it goes along
-    fn emit(&mut self, key: String, value: Vec<u8>) {
-        println!("Emitting: {}, size={}", key, value.len());
     }
 }
 

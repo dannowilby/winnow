@@ -1,5 +1,7 @@
 use futures::{StreamExt, stream::FuturesUnordered};
 use serde::{Deserialize, Serialize};
+use tokio::task::JoinSet;
+use std::collections::HashSet;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -47,14 +49,18 @@ pub async fn handle_promote<W: WasmEnv>(
     _wasm_env: W,
     pr: PromoteRequest,
 ) {
-    let mut events: FuturesUnordered<Pin<Box<dyn Future<Output = LeaderEvent> + Send>>> =
-        FuturesUnordered::new();
+
+    clean_stale_data();
+
+    let mut events =
+        JoinSet::new();
 
     for member in cluster.members.iter() {
-        events.push(Box::pin(heartbeat(member.clone())));
+        events.spawn(Box::pin(heartbeat(member.clone())));
     }
 
     for (index, keys) in split_input(pr.m, &pr.keys) {
+        println!("Sending map job with {:?}", &keys);
         let req = map_request(
             cluster.get_modulo(index).clone(),
             MapRequest {
@@ -67,7 +73,7 @@ pub async fn handle_promote<W: WasmEnv>(
             },
         );
 
-        events.push(Box::pin(req));
+        events.spawn(Box::pin(req));
     }
 
     
@@ -76,17 +82,17 @@ pub async fn handle_promote<W: WasmEnv>(
     let mut total_reduce_jobs = pr.r;
     let mut completed_reduce_jobs = 0;
 
-    let mut partition_locations = HashMap::<String, Vec<Host>>::new();
+    let mut partition_locations = HashMap::<String, HashSet<Host>>::new();
 
-    while let Some(event) = events.next().await {
+    while let Some(Ok(event)) = events.join_next().await {
         match event {
             LeaderEvent::MachineFailure(_host) => {}
             LeaderEvent::MapComplete(mr, host) => {
                 for partition in mr.seen_partitions {
                     partition_locations
                         .entry(partition)
-                        .and_modify(|v| v.push(host.clone()))
-                        .or_insert(vec![host.clone()]);
+                        .and_modify(|v| { v.insert(host.clone()); })
+                        .or_insert(HashSet::from([host.clone()]));
                 }
 
                 completed_map_jobs += 1;
@@ -100,11 +106,12 @@ pub async fn handle_promote<W: WasmEnv>(
                 // we've completed all the map jobs
                 partition_locations.iter().enumerate().for_each(
                     |(index, (partition, locations))| {
-                        events.push(Box::pin(reduce_request(
+                        println!("Sending reduce job with {:?}, {:?}", &partition, &locations);
+                        events.spawn(Box::pin(reduce_request(
                             cluster.get_modulo(index).clone(),
                             ReduceRequest {
                                 partition: partition.clone(),
-                                locations: locations.clone(),
+                                locations: locations.iter().cloned().collect::<Vec<_>>(),
 
                                 reduce_src: pr.reduce_src.clone()
                             },
@@ -123,22 +130,16 @@ pub async fn handle_promote<W: WasmEnv>(
             }
             LeaderEvent::Heartbeat(conn) => {
                 // requeue the heartbeat
-                events.push(Box::pin(heartbeat(conn)));
+                events.spawn(Box::pin(heartbeat(conn)));
             }
         }
     }
 
     println!("finished job!");
+}
 
-    // we have a few different cases we have to handle all at once:
-    // - a map request completes => record the partition locations
-    //   - if this is the final map job, run the reduce requests
-    // - a reduce request completes => record the reduce partitions
-    // - a failure occurs
-    //   - if it had a map job, rerun it and all downstream reduce dependents
-    //   - if it had a reduce job, just rerun it
-
-    
+fn clean_stale_data() {
+    let _ = std::fs::remove_dir_all("./data");
 }
 
 async fn heartbeat(conn: Conn) -> LeaderEvent {

@@ -3,7 +3,7 @@ use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use tarpc::{client, tokio_serde::formats::Json};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct Host {
     pub domain: String,
     pub port: u16,
@@ -86,5 +86,11 @@ impl ClusterConn {
         let n = self.members.len();
 
         self.members.get(index % n).expect("Cluster internal lookup: index % n has failed to retrieve an instance! Seriously wrong!")
+    }
+
+    pub fn get(&self, host: Host) -> &Conn {
+        self.members.iter().find(|Conn(Host{ domain, port }, _)| {
+            domain == &host.domain && port == &host.port
+        }).expect("Cannot find invalid host")
     }
 }

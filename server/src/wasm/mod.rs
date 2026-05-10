@@ -146,7 +146,6 @@ fn pre_instantiate_component(
         HostAPI {
             wasi_ctx,
             resource_table: ResourceTable::new(),
-            locations: HashSet::new(),
         },
     );
 

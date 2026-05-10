@@ -12,7 +12,10 @@ cli: dev-build
     cargo run -p server --bin mapreduce_cli
 
 build-components:
+    cargo build -p read --target=wasm32-wasip2 --release
     cargo build -p map --target=wasm32-wasip2 --release
+    cargo build -p reduce --target=wasm32-wasip2 --release
+    cargo build -p partition --target=wasm32-wasip2 --release
 
 server: dev-build
     cargo run -p server --bin mapreduce_bin

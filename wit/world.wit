@@ -13,8 +13,7 @@ world reader {
 world mapper {
   import logging;
 
-  import emit: func(key: string, value: list<u8>);
-  export map-fn: func(key: string, value: list<u8>) -> list<string>;
+  export map-fn: func(key: string, value: list<u8>) -> list<tuple<string, list<u8>>>;
 }
 
 world reducer {

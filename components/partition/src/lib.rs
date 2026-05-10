@@ -16,7 +16,7 @@ impl Guest for PartitionerComponent {
         
         log(&key);
         
-        format!("p-{}", t % r)
+        key
     }
 }
 

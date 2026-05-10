@@ -3,7 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mapreduce::{cluster::ClusterList, promote::PromoteRequest};
+use mapreduce::{cluster::ClusterList, download::DownloadRequest, promote::PromoteRequest};
+use serde::Deserialize;
 use tarpc::context;
 
 #[tokio::main]
@@ -25,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         partition_src: fs::read("./target/wasm32-wasip2/release/partition.wasm")?,
         m: 2,
         r: 2,
-        keys: vec!["Key 1".to_owned(), "Key 2".to_owned()],
+        keys: vec!["1".to_owned(), "2".to_owned(), "3".to_owned()],
     };
 
     let mut ctx = context::current();
@@ -43,6 +44,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Job completed successfully!");
             println!();
             println!("Completed in: {}ms", n.elapsed().as_millis());
+
+            let Ok(r) = cluster.get_modulo(0).1.download(context::current(), DownloadRequest {location: "data/odd-output".to_owned()}).await else {
+                println!("Error with final output! 1");
+                return Ok(());
+            };
+
+            println!("odd-sum: {:?}", deserialize_output(r));
+
+            let Ok(r) = cluster.get_modulo(0).1.download(context::current(), DownloadRequest {location: "data/even-output".to_owned()}).await else {
+                println!("Error with final output! 2");
+                return Ok(());
+            };
+
+            println!("even-sum: {:?}", deserialize_output(r));
         }
         Err(e) => {
             println!("Job failed!");
@@ -52,4 +67,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     Ok(())
+}
+
+fn deserialize_output(r: Vec<u8>) -> Vec<i32> {
+
+    let output_data: Vec<i32> = rmp_serde::from_slice(&r).expect("should have some actual data");
+return output_data;
 }

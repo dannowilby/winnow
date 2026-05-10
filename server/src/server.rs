@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    cluster::ClusterConn,
-    map::{MapRequest, MapResponse, handle_map},
-    promote::{PromoteRequest, handle_promote},
-    reduce::{ReduceRequest, handle_reduce},
-    wasm::WasmEnv,
+    cluster::ClusterConn, download::{DownloadRequest, handle_download}, map::{MapRequest, MapResponse, handle_map}, promote::{PromoteRequest, handle_promote}, reduce::{ReduceRequest, handle_reduce}, wasm::WasmEnv
 };
 use tarpc::context;
 
@@ -20,7 +16,7 @@ pub trait MapReduceService {
 
     async fn promote(pr: PromoteRequest) -> ();
 
-    async fn download(file: String) -> Vec<u8>;
+    async fn download(dr: DownloadRequest) -> Vec<u8>;
 }
 
 #[derive(Clone)]
@@ -30,10 +26,10 @@ pub struct MapReduceServer<W: WasmEnv> {
 }
 
 impl<W: WasmEnv> MapReduceServer<W> {
-    pub fn new(cluster: ClusterConn) -> Self {
+    pub fn new(cluster: Arc<ClusterConn>) -> Self {
         let wasm_env = W::new().unwrap();
         Self {
-            cluster: Arc::new(cluster),
+            cluster: cluster,
             wasm_env,
         }
     }
@@ -46,18 +42,18 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
     }
 
     async fn map(self, _: context::Context, mp: MapRequest) -> MapResponse {
-        handle_map(self.cluster.clone(), self.wasm_env.clone(), mp).await
+        handle_map(self.wasm_env.clone(), mp).await
     }
 
-    async fn reduce(self, _: context::Context, _rr: ReduceRequest) -> () {
-        handle_reduce().await
+    async fn reduce(self, _: context::Context, rr: ReduceRequest) -> () {
+        handle_reduce(self.cluster.clone(), self.wasm_env.clone(), rr).await
     }
 
     async fn promote(self, _: context::Context, pr: PromoteRequest) -> () {
         handle_promote(self.cluster.clone(), self.wasm_env.clone(), pr).await;
     }
 
-    async fn download(self, _: context::Context, _file: String) -> Vec<u8> {
-        vec![0x00]
+    async fn download(self, _: context::Context, dr: DownloadRequest) -> Vec<u8> {
+        handle_download(dr).await
     }
 }
