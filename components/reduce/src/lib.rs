@@ -15,7 +15,6 @@ impl Guest for ReducerComponent {
         if acc.len() > 0 {
             a = rmp_serde::from_slice(&acc).expect("r2");
         }
-        
         rmp_serde::to_vec(&(v+a)).expect("r3")
     }
 }
