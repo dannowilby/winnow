@@ -1,9 +1,20 @@
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crate::{
-    cluster::ClusterConn, download::{DownloadRequest, handle_download}, map::{MapRequest, MapResponse, handle_map}, promote::{PromoteRequest, handle_promote}, reduce::{ReduceRequest, handle_reduce}, wasm::WasmEnv
+    cluster::{Cluster, Host},
+    job_lookup::{self, JobLookup},
+    map::{MapRequest, MapResponse, handle_map},
+    promote::{PromoteRequest, handle_promote},
+    query::{QueryRequest, QueryResponse, handle_query},
+    reduce::{ReduceRequest, handle_reduce},
+    wasm::WasmEnv,
 };
-use tarpc::context;
+use tarpc::context::{self, Context};
+use tokio::sync::RwLock;
 
 #[tarpc::service]
 pub trait MapReduceService {
@@ -14,22 +25,28 @@ pub trait MapReduceService {
 
     async fn reduce(rr: ReduceRequest) -> ();
 
-    async fn promote(pr: PromoteRequest) -> ();
+    async fn promote(pr: PromoteRequest) -> HashMap<String, Host>;
 
-    async fn download(dr: DownloadRequest) -> Vec<u8>;
+    async fn query(q: QueryRequest) -> QueryResponse;
 }
 
 #[derive(Clone)]
 pub struct MapReduceServer<W: WasmEnv> {
-    cluster: Arc<ClusterConn>,
-    wasm_env: W,
+    pub cluster: Arc<RwLock<Cluster>>,
+    pub job_lookup: Arc<RwLock<JobLookup>>,
+
+    pub wasm_env: W,
 }
 
 impl<W: WasmEnv> MapReduceServer<W> {
-    pub fn new(cluster: Arc<ClusterConn>) -> Self {
-        let wasm_env = W::new().unwrap();
+    pub fn new(
+        cluster: Arc<RwLock<Cluster>>,
+        job_lookup: Arc<RwLock<JobLookup>>,
+        wasm_env: W,
+    ) -> Self {
         Self {
-            cluster: cluster,
+            cluster,
+            job_lookup,
             wasm_env,
         }
     }
@@ -46,14 +63,23 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
     }
 
     async fn reduce(self, _: context::Context, rr: ReduceRequest) -> () {
-        handle_reduce(self.cluster.clone(), self.wasm_env.clone(), rr).await
+        handle_reduce(self, rr).await
     }
 
-    async fn promote(self, _: context::Context, pr: PromoteRequest) -> () {
-        handle_promote(self.cluster.clone(), self.wasm_env.clone(), pr).await;
+    async fn promote(self, _: context::Context, pr: PromoteRequest) -> HashMap<String, Host> {
+        handle_promote(self, pr).await
     }
 
-    async fn download(self, _: context::Context, dr: DownloadRequest) -> Vec<u8> {
-        handle_download(dr).await
+    async fn query(self, _: context::Context, q: QueryRequest) -> QueryResponse {
+        handle_query(self, q).await
     }
+}
+
+/// Returns a request context with a longer default timeout. Useful as
+/// map/reduce endpoints take a while loading WASM and computing output.
+pub fn context() -> Context {
+    let mut ctx = context::current();
+    ctx.deadline = Instant::now() + Duration::from_secs(60);
+
+    ctx
 }

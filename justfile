@@ -20,6 +20,9 @@ build-components:
 server: dev-build
     cargo run -p server --bin mapreduce_bin
 
+run-local-cluster:
+    cd build && docker compose up
+
 test: dev-build
     cargo test -p server -- --no-capture
 

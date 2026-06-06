@@ -11,21 +11,11 @@ struct ReaderComponent;
 
 impl Guest for ReaderComponent {
     fn read_fn(key: String) -> Vec<u8> {
-        
-        log(&format!("Mapping key: {}", &key));
+        let k = key.parse::<i32>().unwrap();
 
-        if &key == "1" {
-            return rmp_serde::to_vec(&vec![1, 2, 3, 4, 5]).unwrap();
-        }
-        if &key == "2" {
-            return rmp_serde::to_vec(&vec![6, 7, 8, 9, 10]).unwrap();
-        }
-        if &key == "3" {
-            return rmp_serde::to_vec(&vec![11, 12, 13, 14, 15]).unwrap();
-        }
+        let x: Vec<i32> = (((k - 1) * 10)..((k) * 10)).map(|x| x + 1).collect();
 
-        
-        rmp_serde::to_vec(&Vec::<u8>::new()).unwrap()
+        rmp_serde::to_vec(&x).unwrap()
     }
 }
 

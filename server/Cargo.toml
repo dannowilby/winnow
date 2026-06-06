@@ -23,8 +23,10 @@ futures = { workspace = true}
 tarpc = { workspace = true}
 tokio = { workspace = true}
 serde = { workspace = true }
+serde_json = "1.0"
 serde_bytes = { workspace = true }
 postcard = { workspace = true }
 dashmap = { workspace = true }
 ext-sort = "0.1.5"
 rmp-serde = { workspace = true }
+rand = { workspace = true }

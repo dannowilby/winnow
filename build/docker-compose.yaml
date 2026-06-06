@@ -1,0 +1,31 @@
+# Spins up the three-node cluster described in cluster.json.
+#
+# Every member binds to [::1] (see cluster.json), so the nodes can only reach
+# one another over a shared loopback interface. `network_mode: host` puts all
+# three containers on the host's network namespace, giving them a common
+# [::1]:300x to talk over. Each node is told which member it is via PORT, from
+# which main.rs derives its loopback index.
+
+x-mapreduce: &mapreduce
+  build:
+    context: ..
+    dockerfile: build/Dockerfile
+  image: mapreduce-rs:latest
+  network_mode: host
+  restart: unless-stopped
+
+services:
+  node0:
+    <<: *mapreduce
+    environment:
+      PORT: "3000"
+
+  node1:
+    <<: *mapreduce
+    environment:
+      PORT: "3001"
+
+  node2:
+    <<: *mapreduce
+    environment:
+      PORT: "3002"

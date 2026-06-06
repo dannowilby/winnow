@@ -1,18 +1,26 @@
-use std::{
-    fs,
-    time::{Duration, Instant},
+use std::{fs, time::Instant};
+
+use mapreduce::{
+    cluster::ClusterList,
+    error::CliError,
+    promote::PromoteRequest,
+    query::{OutputData, QueryRequest, QueryResponse},
+    server::context,
 };
 
-use mapreduce::{cluster::ClusterList, download::DownloadRequest, promote::PromoteRequest};
-use serde::Deserialize;
-use tarpc::context;
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cluster = ClusterList::new(vec![("localhost".to_owned(), 3000)])
-        .connect()
-        .await;
-
+async fn main() -> Result<(), CliError> {
+    let cluster = ClusterList::new(
+        vec![
+            ("[::1]".to_owned(), 3000),
+            ("[::1]".to_owned(), 3001),
+            ("[::1]".to_owned(), 3002),
+        ],
+        0,
+    )
+    .connect()
+    .await;
+    println!("Here?");
     // Where you might find the wasm binaries:
     // let paths = fs::read_dir("./target/wasm32-wasip2/release").unwrap();
     // for path in paths {
@@ -24,53 +32,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         map_src: fs::read("./target/wasm32-wasip2/release/map.wasm")?,
         reduce_src: fs::read("./target/wasm32-wasip2/release/reduce.wasm")?,
         partition_src: fs::read("./target/wasm32-wasip2/release/partition.wasm")?,
-        m: 2,
+        m: 5,
         r: 2,
-        keys: vec!["1".to_owned(), "2".to_owned(), "3".to_owned()],
+        keys: vec!["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+            .iter()
+            .map(|k| String::from(*k))
+            .collect::<Vec<String>>(),
     };
 
-    let mut ctx = context::current();
-    ctx.deadline = Instant::now() + Duration::from_secs(15);
+    let ctx = context();
 
     let n = Instant::now();
     let ack = cluster
-        .get_modulo(0)
-        .1
+        .get_loopback()
+        .client
+        .as_ref()
+        .unwrap()
         .promote(ctx, promote_request)
-        .await;
-    
-    match ack {
-        Ok(_) => {
-            println!("Job completed successfully!");
-            println!();
-            println!("Completed in: {}ms", n.elapsed().as_millis());
+        .await?;
 
-            let Ok(r) = cluster.get_modulo(0).1.download(context::current(), DownloadRequest {location: "data/odd-output".to_owned()}).await else {
-                println!("Error with final output! 1");
-                return Ok(());
-            };
+    println!("Took {}ms to complete!", n.elapsed().as_millis());
 
-            println!("odd-sum: {:?}", deserialize_output(r));
+    for (partition, host) in ack {
+        let download = cluster
+            .get_unchecked(host)
+            .client
+            .as_ref()
+            .unwrap()
+            .query(
+                context(),
+                QueryRequest::Download(format!("data/{}-output", &partition)),
+            )
+            .await?;
 
-            let Ok(r) = cluster.get_modulo(0).1.download(context::current(), DownloadRequest {location: "data/even-output".to_owned()}).await else {
-                println!("Error with final output! 2");
-                return Ok(());
-            };
+        let QueryResponse::Data(d) = download else {
+            return Err(CliError::from(
+                "Error decoding successful query response, got some other QueryResponse variant",
+            ));
+            // panic!();
+        };
 
-            println!("even-sum: {:?}", deserialize_output(r));
-        }
-        Err(e) => {
-            println!("Job failed!");
-            println!("Errored in: {}ms", n.elapsed().as_millis());
-            eprintln!("{}",e);
-        }
+        deserialize_and_print_output(d);
     }
-    
+
     Ok(())
 }
 
-fn deserialize_output(r: Vec<u8>) -> Vec<i32> {
-
-    let output_data: Vec<i32> = rmp_serde::from_slice(&r).expect("should have some actual data");
-return output_data;
+fn deserialize_and_print_output(r: Vec<u8>) {
+    let output_data: OutputData = rmp_serde::from_slice(&r).expect("should have some actual data");
+    let o: i32 = rmp_serde::from_slice(&output_data.1).expect("hm");
+    println!("{}: {}", output_data.0, o);
 }
