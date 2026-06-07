@@ -13,6 +13,7 @@ use crate::{
     promote::{PromoteRequest, handle_promote},
     query::{QueryRequest, QueryResponse, handle_query},
     reduce::{ReduceRequest, handle_reduce},
+    storage::Storage,
     wasm::WasmEnv,
 };
 use tarpc::context::{self, Context};
@@ -44,6 +45,8 @@ pub struct MapReduceServer<W: WasmEnv> {
     pub programs: Arc<RwLock<Programs>>,
 
     pub wasm_env: W,
+
+    pub storage: Arc<Storage>,
 }
 
 impl<W: WasmEnv> MapReduceServer<W> {
@@ -52,12 +55,14 @@ impl<W: WasmEnv> MapReduceServer<W> {
         job_lookup: Arc<RwLock<JobLookup>>,
         programs: Arc<RwLock<Programs>>,
         wasm_env: W,
+        storage: Arc<Storage>,
     ) -> Self {
         Self {
             cluster,
             job_lookup,
             programs,
             wasm_env,
+            storage,
         }
     }
 }

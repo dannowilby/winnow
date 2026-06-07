@@ -3,8 +3,9 @@ use std::{fs, time::Instant};
 use mapreduce::{
     cluster::ClusterList,
     promote::PromoteRequest,
-    query::{OutputData, QueryRequest, QueryResponse},
+    query::{QueryRequest, QueryResponse},
     server::context,
+    storage::OutputData,
 };
 use tarpc::client::RpcError;
 use thiserror::Error;
@@ -70,10 +71,7 @@ async fn main() -> Result<(), CliError> {
             .client
             .as_ref()
             .unwrap()
-            .query(
-                context(),
-                QueryRequest::Download(format!("data/{}-output", &partition)),
-            )
+            .query(context(), QueryRequest::DownloadReduceOutput(partition))
             .await?;
 
         let Ok(QueryResponse::Data(d)) = download else {

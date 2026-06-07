@@ -1,24 +1,15 @@
-use std::{
-    collections::VecDeque,
-    fs::{self, OpenOptions},
-    io::{self, BufReader, Read, Write},
-    iter::Peekable,
-    marker::PhantomData,
-    time::Duration,
-};
+use std::{collections::VecDeque, time::Duration};
 
 use thiserror::Error;
 use tokio::time::sleep;
 
-use ext_sort::{
-    BinaryHeapMerger, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder, RmpExternalChunk,
-};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     cluster::Host,
-    query::{IntermediateData, OutputData, QueryRequest, QueryResponse},
+    query::{QueryRequest, QueryResponse},
     server::{MapReduceServer, context},
+    storage::{OutputData, StorageError},
     wasm::{WasmEnv, handle::reduce::ReduceFn},
 };
 
@@ -40,6 +31,8 @@ pub enum ReduceError {
     EncodeError(#[from] rmp_serde::encode::Error),
     #[error(transparent)]
     WasmError(#[from] wasmtime::error::Error),
+    #[error(transparent)]
+    StorageError(#[from] StorageError),
 }
 
 pub async fn handle_reduce<W: WasmEnv>(
@@ -54,8 +47,6 @@ pub async fn handle_reduce<W: WasmEnv>(
         .wasm_env
         .load_reduce_binary(&programs.reduce_src)
         .await?;
-
-    let file_path = format!("data/{}-sorted", &rr.partition);
 
     let mut download_queue = VecDeque::from(rr.indices);
     let mut leader = server
@@ -130,7 +121,7 @@ pub async fn handle_reduce<W: WasmEnv>(
             .unwrap()
             .query(
                 context(),
-                QueryRequest::Download(format!("data/{}on{}", &rr.partition, index)),
+                QueryRequest::DownloadMapOutput(index, rr.partition.clone()),
             )
             .await;
 
@@ -140,23 +131,15 @@ pub async fn handle_reduce<W: WasmEnv>(
             continue;
         };
 
-        // write the data if successful (if not successful, requeue the index)
-        let mut f = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&file_path)?;
-        f.write(&data)?;
+        server
+            .storage
+            .append_reduce_in(rr.partition.clone(), data)?;
     }
 
     // Sort the data and create an iterator over it
-    let mut sorted = external_sort(&file_path)?;
-
-    // create our final output file
-    let output_file_path = format!("data/{}-output", rr.partition);
-    let mut output_file = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(output_file_path)?;
+    let mut sorted = server
+        .storage
+        .get_reduce_external_sort_iter(rr.partition.clone())?;
 
     // iterate over sorted kv pairs and fold with the reducer
     let mut acc = Vec::<u8>::new();
@@ -172,8 +155,9 @@ pub async fn handle_reduce<W: WasmEnv>(
         if let Some(Ok(next_item)) = sorted.peek() {
             if next_item.key != item.key {
                 let output = OutputData(item.key, acc);
-                let b = rmp_serde::to_vec(&output)?;
-                output_file.write(&b)?;
+                server
+                    .storage
+                    .append_reduce_out(rr.partition.clone(), output)?;
 
                 acc = Vec::new();
             }
@@ -181,65 +165,9 @@ pub async fn handle_reduce<W: WasmEnv>(
     }
 
     let output = OutputData(key, acc);
-    let b = rmp_serde::to_vec(&output)?;
-    output_file.write(&b)?;
+    server
+        .storage
+        .append_reduce_out(rr.partition.clone(), output)?;
 
     Ok(())
-}
-
-fn external_sort(
-    file_path: &str,
-) -> Result<
-    Peekable<
-        BinaryHeapMerger<
-            IntermediateData,
-            rmp_serde::decode::Error,
-            fn(&IntermediateData, &IntermediateData) -> std::cmp::Ordering,
-            RmpExternalChunk<IntermediateData>,
-        >,
-    >,
-    std::io::Error,
-> {
-    let sort_file = fs::File::open(&file_path)?;
-    let file_size = sort_file.metadata()?.len();
-    let reader = BufReader::new(sort_file).take(file_size);
-    let iter: RmpIter<IntermediateData> = RmpIter {
-        reader,
-        _marker: PhantomData,
-    };
-
-    let sorter: ExternalSorter<IntermediateData, rmp_serde::decode::Error, LimitedBufferBuilder> =
-        ExternalSorterBuilder::new()
-            .with_tmp_dir(std::path::Path::new("./data"))
-            .with_buffer(LimitedBufferBuilder::new(100_000, false))
-            .build()
-            .expect("Could not build sorter");
-
-    Ok(sorter
-        .sort_by(
-            iter,
-            cmp_intermediate as fn(&IntermediateData, &IntermediateData) -> std::cmp::Ordering,
-        )
-        .expect("Could not sort data")
-        .peekable())
-}
-
-struct RmpIter<T> {
-    reader: io::Take<BufReader<fs::File>>,
-    _marker: PhantomData<T>,
-}
-
-impl<T: serde::de::DeserializeOwned> Iterator for RmpIter<T> {
-    type Item = Result<T, rmp_serde::decode::Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.reader.limit() == 0 {
-            return None;
-        }
-        Some(rmp_serde::decode::from_read(&mut self.reader))
-    }
-}
-
-fn cmp_intermediate(a: &IntermediateData, b: &IntermediateData) -> std::cmp::Ordering {
-    a.key.cmp(&b.key)
 }

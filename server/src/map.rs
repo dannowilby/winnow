@@ -1,11 +1,11 @@
-use std::{collections::HashSet, fs::OpenOptions, io::Write};
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    query::IntermediateData,
     server::MapReduceServer,
+    storage::{IntermediateData, StorageError},
     wasm::{
         WasmEnv,
         handle::{map::MapFn, partition::PartitionFn, read::ReadFn},
@@ -34,14 +34,14 @@ pub enum MapError {
     EncodeError(#[from] rmp_serde::encode::Error),
     #[error(transparent)]
     WasmError(#[from] wasmtime::error::Error),
+    #[error(transparent)]
+    StorageError(#[from] StorageError),
 }
 
 pub async fn handle_map<W: WasmEnv>(
     server: MapReduceServer<W>,
     mp: MapRequest,
 ) -> Result<MapResponse, MapError> {
-    std::fs::create_dir_all("./data")?;
-
     // We have to create the environment in the thread that builds and
     // executes the wasm code. wasmtime constructs do not mostly implement `Send`
     let programs = server.programs.read().await;
@@ -62,9 +62,9 @@ pub async fn handle_map<W: WasmEnv>(
         for (out_key, value) in kvs {
             let partition = partitioner.partition(&out_key, mp.r).await?;
 
-            save_data(
+            server.storage.append_map_out(
                 mp.index,
-                &partition,
+                partition.clone(),
                 IntermediateData {
                     key: out_key,
                     value,
@@ -79,23 +79,6 @@ pub async fn handle_map<W: WasmEnv>(
         index: mp.index,
         seen_partitions: seen_partitions.into_iter().collect::<Vec<String>>(),
     })
-}
-
-fn save_data(
-    index: usize,
-    partition: &str,
-    intermediate_data: IntermediateData,
-) -> Result<(), MapError> {
-    let mut file = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(format!("data/{}on{}", partition, index))?;
-
-    let b = rmp_serde::to_vec(&intermediate_data)?;
-
-    file.write(&b)?;
-
-    Ok(())
 }
 
 #[cfg(test)]

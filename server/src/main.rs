@@ -5,6 +5,7 @@ use mapreduce::{
     job_lookup::JobLookup,
     prime::Programs,
     server::{MapReduceServer, MapReduceService},
+    storage::Storage,
     wasm::{DefaultWasmEnv, WasmEnv},
 };
 use serde::Deserialize;
@@ -85,6 +86,7 @@ async fn main() -> Result<()> {
     let job_lookup = Arc::new(RwLock::new(JobLookup::new()));
     let programs = Arc::new(RwLock::new(Programs::default()));
     let wasm_env = DefaultWasmEnv::new().unwrap();
+    let storage = Arc::new(Storage::new("./data"));
 
     listener
         // Ignore accept errors.
@@ -104,6 +106,7 @@ async fn main() -> Result<()> {
                 job_lookup.clone(),
                 programs.clone(),
                 wasm_env.clone(),
+                storage.clone(),
             );
             channel.execute(server.serve()).for_each(spawn).await
         })

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::{server::MapReduceServer, wasm::WasmEnv};
+use crate::{server::MapReduceServer, storage::StorageError, wasm::WasmEnv};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PrimeRequest {
@@ -21,19 +22,20 @@ pub struct Programs {
     pub partition_src: Vec<u8>,
 }
 
+#[derive(Error, Debug)]
+pub enum PrimeError {
+    #[error(transparent)]
+    StorageError(#[from] StorageError),
+}
+
 /// Resets the machine for a fresh map-reduce run: wipes the data folder, clears
 /// the global job-lookup state, and stores the supplied programs globally so the
 /// map and reduce endpoints can use them.
 pub async fn handle_prime<W: WasmEnv>(
     server: MapReduceServer<W>,
     pr: PrimeRequest,
-) -> Result<(), std::io::Error> {
-    // wipe any stale intermediate/output data, then recreate the folder so it
-    // exists even on nodes that get a reduce job without ever running a map job
-    if std::fs::exists("./data")? {
-        std::fs::remove_dir_all("./data")?;
-    }
-    std::fs::create_dir_all("./data")?;
+) -> Result<(), PrimeError> {
+    server.storage.reset()?;
 
     // clear the global job-lookup state
     server.job_lookup.write().await.clear();
