@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 common = { path = "../common" }
-wit-bindgen = { workspace = true}
+wit-bindgen = { workspace = true, features = ["async"] }
 serde = { workspace = true }
 
 dlmalloc = {workspace = true}

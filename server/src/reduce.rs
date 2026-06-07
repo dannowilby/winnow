@@ -50,7 +50,10 @@ pub async fn handle_reduce<W: WasmEnv>(
 
     // if we're going to fail, at least fail before downloading everything
     let programs = server.programs.read().await;
-    let mut reducer = server.wasm_env.load_reduce_binary(&programs.reduce_src)?;
+    let mut reducer = server
+        .wasm_env
+        .load_reduce_binary(&programs.reduce_src)
+        .await?;
 
     let file_path = format!("data/{}-sorted", &rr.partition);
 
@@ -162,7 +165,7 @@ pub async fn handle_reduce<W: WasmEnv>(
     while let Some(Ok(item)) = sorted.next() {
         // println!("item: {}", rmp_serde::from_slice::<i32>(&item.value).expect("l"));
         key = item.key.clone();
-        acc = tokio::task::block_in_place(|| reducer.reduce(&item.key, &item.value, &acc))?;
+        acc = reducer.reduce(&item.key, &item.value, &acc).await?;
 
         // println!("[Reducer] acc is now: {}", rmp_serde::from_slice::<i32>(&acc).expect("j"));
 

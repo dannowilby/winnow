@@ -46,20 +46,21 @@ pub async fn handle_map<W: WasmEnv>(
     // executes the wasm code. wasmtime constructs do not mostly implement `Send`
     let programs = server.programs.read().await;
 
-    let mut mapper = server.wasm_env.load_map_binary(&programs.map_src)?;
-    let mut reader = server.wasm_env.load_read_binary(&programs.read_src)?;
+    let mut mapper = server.wasm_env.load_map_binary(&programs.map_src).await?;
+    let mut reader = server.wasm_env.load_read_binary(&programs.read_src).await?;
     let mut partitioner = server
         .wasm_env
-        .load_partition_binary(&programs.partition_src)?;
+        .load_partition_binary(&programs.partition_src)
+        .await?;
 
     let mut seen_partitions = HashSet::<String>::new();
 
     for key in mp.key_range {
-        let value = reader.read(&key)?;
-        let kvs = mapper.map(&key, &value)?;
+        let value = reader.read(&key).await?;
+        let kvs = mapper.map(&key, &value).await?;
 
         for (out_key, value) in kvs {
-            let partition = partitioner.partition(&out_key, mp.r)?;
+            let partition = partitioner.partition(&out_key, mp.r).await?;
 
             save_data(
                 mp.index,

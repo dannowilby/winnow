@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use wasmtime::Store;
 
 use crate::wasm::{context::HostAPI, reducer::Reducer};
@@ -8,7 +10,7 @@ pub trait ReduceFn {
         key: &str,
         value: &[u8],
         acc: &[u8],
-    ) -> Result<Vec<u8>, wasmtime::error::Error>;
+    ) -> impl Future<Output = Result<Vec<u8>, wasmtime::error::Error>> + Send;
 }
 
 pub struct ReduceHandle {
@@ -17,7 +19,7 @@ pub struct ReduceHandle {
 }
 
 impl ReduceFn for ReduceHandle {
-    fn reduce(
+    async fn reduce(
         &mut self,
         key: &str,
         value: &[u8],
@@ -25,5 +27,6 @@ impl ReduceFn for ReduceHandle {
     ) -> Result<Vec<u8>, wasmtime::error::Error> {
         self.reducer
             .call_reduce_fn(&mut self.store, key, value, acc)
+            .await
     }
 }

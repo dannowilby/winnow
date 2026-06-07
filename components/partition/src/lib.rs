@@ -9,7 +9,7 @@ use mapreduce::typeimpls::logging::log;
 struct PartitionerComponent;
 
 impl Guest for PartitionerComponent {
-    fn partition_fn(key: String, r: u32) -> String {
+    async fn partition_fn(key: String, r: u32) -> String {
         // let mut dh = DefaultHasher::new();
         // key.hash(&mut dh);
         // let t = dh.finish() as u32;

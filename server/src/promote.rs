@@ -40,6 +40,8 @@ pub enum LeaderEvent {
     Heartbeat(ActiveConnection),
 }
 
+pub enum PromoteError {}
+
 /// Coordinates all the machines and drive map-reduce to completion.
 pub async fn handle_promote<W: WasmEnv>(
     server: MapReduceServer<W>,
