@@ -115,5 +115,7 @@ async fn main() -> Result<()> {
         .for_each(|_| async {})
         .await;
 
+    storage.clear()?;
+
     Ok(())
 }
