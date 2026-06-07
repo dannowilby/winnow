@@ -1,3 +1,4 @@
+use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -9,6 +10,7 @@ use crate::server::{MapReduceServer, context};
 use crate::{
     cluster::Host,
     map::{MapRequest, MapResponse},
+    prime::PrimeRequest,
     reduce::ReduceRequest,
     wasm::WasmEnv,
 };
@@ -46,20 +48,21 @@ pub async fn handle_promote<W: WasmEnv>(
     // verify that all connections are up to date
     server.cluster.write().await.reconnect().await;
 
-    // clean stale data
-    let _ = std::fs::remove_dir_all("./data");
-    server.job_lookup.write().await.clear();
+    // prime every member: this clears their data folder + global state and
+    // distributes the programs the map and reduce endpoints will use.
+    prime_cluster(&server, &pr).await;
 
     let mut events = JoinSet::new();
     spawn_initial_heartbeats(&mut events, &server).await;
 
-    let mut completed_reduce_jobs = 0;
-    let mut total_reduce_jobs = 0;
+    let mut completed_reduce_jobs: usize = 0;
+    let mut total_reduce_jobs: usize = 0;
 
     let mut sent_initial_reduce_jobs = false;
 
-    let mut completed_map_jobs = 0;
-    let total_map_jobs = spawn_initial_map_jobs(&mut events, &server, &pr).await;
+    let mut completed_map_jobs: usize = 0;
+    println!("Spawning map jobs");
+    let total_map_jobs: usize = spawn_initial_map_jobs(&mut events, &server, &pr).await;
 
     while let Some(Ok(event)) = events.join_next().await {
         match event {
@@ -67,8 +70,8 @@ pub async fn handle_promote<W: WasmEnv>(
                 let (map_job_delta, reduce_job_delta) =
                     handle_machine_failure(&mut events, &server, &pr, host).await;
 
-                completed_map_jobs -= map_job_delta;
-                completed_reduce_jobs -= reduce_job_delta;
+                completed_map_jobs = completed_map_jobs.saturating_sub(map_job_delta);
+                completed_reduce_jobs = completed_reduce_jobs.saturating_sub(reduce_job_delta);
             }
             LeaderEvent::MapComplete(mr, _host) => {
                 let mut job_lookup = server.job_lookup.write().await;
@@ -113,7 +116,51 @@ pub async fn handle_promote<W: WasmEnv>(
         }
     }
 
+    println!("Finished job");
     server.job_lookup.read().await.reducing.clone()
+}
+
+/// Sends a [PrimeRequest] to every live member so each machine wipes its data
+/// folder + global state and stores the programs used by map and reduce.
+async fn prime_cluster<W: WasmEnv>(server: &MapReduceServer<W>, pr: &PromoteRequest) {
+    let prime_request = PrimeRequest {
+        read_src: pr.read_src.clone(),
+        map_src: pr.map_src.clone(),
+        reduce_src: pr.reduce_src.clone(),
+        partition_src: pr.partition_src.clone(),
+    };
+
+    let connections = server
+        .cluster
+        .read()
+        .await
+        .iter()
+        .filter(|connection| connection.client.is_some())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let prime_futures = connections.into_iter().map(|connection| {
+        let prime_request = prime_request.clone();
+        async move {
+            let result = connection
+                .client
+                .as_ref()
+                .unwrap()
+                .prime(context(), prime_request)
+                .await;
+
+            if result.is_err() {
+                println!(
+                    "[prime][WARNING]: could not prime host ({:?}), see below for details",
+                    connection.host
+                );
+                println!("[prime][WARNING]: {}", result.err().unwrap());
+                server.cluster.write().await.signal_fail(connection.host);
+            }
+        }
+    });
+
+    join_all(prime_futures).await;
 }
 
 async fn spawn_initial_heartbeats<W: WasmEnv>(
@@ -176,13 +223,8 @@ async fn spawn_initial_reduce_jobs<W: WasmEnv>(
             .await
             .create_reduce_job(partition.clone(), connection.host.clone());
 
-        let request_future = send_reduce_request(
-            connection.clone(),
-            pr.clone(),
-            leader,
-            partition,
-            indices.clone(),
-        );
+        let request_future =
+            send_reduce_request(connection.clone(), leader, partition, indices.clone());
         events.spawn(request_future);
     }
 
@@ -234,7 +276,6 @@ async fn handle_machine_failure<W: WasmEnv>(
 
         let request_future = send_reduce_request(
             connection.clone(),
-            pr.clone(),
             cluster.get_loopback().host.clone(),
             partition.clone(),
             indices,
@@ -277,9 +318,6 @@ async fn send_map_request(
         index,
         key_range: keys,
         r: pr.r,
-        read_src: pr.read_src.clone(),
-        map_src: pr.map_src.clone(),
-        partition_src: pr.partition_src.clone(),
     };
 
     if connection.client.is_none() {
@@ -294,7 +332,14 @@ async fn send_map_request(
         .await;
 
     match result {
-        Ok(mr) => LeaderEvent::MapComplete(mr, connection.host.clone()),
+        Ok(response) => {
+            if response.is_err() {
+                println!("[map][WARNING]: {}", response.err().unwrap());
+                return LeaderEvent::MachineFailure(connection.host.clone());
+            }
+
+            return LeaderEvent::MapComplete(response.unwrap(), connection.host.clone());
+        }
         Err(_) => LeaderEvent::MachineFailure(connection.host.clone()),
     }
 }
@@ -303,7 +348,6 @@ async fn send_map_request(
 /// a [machine failure](crate::promote::LeaderEvent::MachineFailure).
 async fn send_reduce_request(
     connection: ActiveConnection,
-    pr: PromoteRequest,
     leader: Host,
     partition: String,
     indices: Vec<usize>,
@@ -311,7 +355,6 @@ async fn send_reduce_request(
     let reduce_request_payload = ReduceRequest {
         partition: partition.clone(),
         indices,
-        reduce_src: pr.reduce_src.clone(),
         leader,
     };
 
@@ -327,7 +370,14 @@ async fn send_reduce_request(
         .await;
 
     match result {
-        Ok(_) => LeaderEvent::ReduceComplete(partition, connection.host.clone()),
+        Ok(response) => {
+            if response.is_err() {
+                println!("[reduce][WARNING]: {}", response.err().unwrap());
+                return LeaderEvent::MachineFailure(connection.host.clone());
+            }
+
+            LeaderEvent::ReduceComplete(partition, connection.host.clone())
+        }
         Err(_) => LeaderEvent::MachineFailure(connection.host.clone()),
     }
 }

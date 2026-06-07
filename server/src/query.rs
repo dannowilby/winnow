@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{cluster::Host, map::MapJobMetadata, server::MapReduceServer, wasm::WasmEnv};
+use crate::{cluster::Host, server::MapReduceServer, wasm::WasmEnv};
 
 #[derive(Deserialize, Serialize)]
 pub struct IntermediateData {
@@ -31,18 +31,19 @@ pub enum QueryResponse {
 pub async fn handle_query<W: WasmEnv>(
     server: MapReduceServer<W>,
     q: QueryRequest,
-) -> QueryResponse {
+) -> Result<QueryResponse, std::io::Error> {
     match q {
         QueryRequest::Download(location) => {
-            QueryResponse::Data(std::fs::read(format!("{}", location)).expect("No matched file!"))
+            let data = std::fs::read(format!("{}", location))?;
+            Ok(QueryResponse::Data(data))
         }
-        QueryRequest::IndexLocation(index) => QueryResponse::Host(
+        QueryRequest::IndexLocation(index) => Ok(QueryResponse::Host(
             server
                 .job_lookup
                 .read()
                 .await
                 .get_host_by_index(index)
                 .clone(),
-        ),
+        )),
     }
 }

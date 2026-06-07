@@ -1,8 +1,6 @@
 mod context;
 pub mod handle;
 
-use std::collections::HashSet;
-
 use crate::wasm::{
     context::{ExtensionData, HostAPI},
     handle::{

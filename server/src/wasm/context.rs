@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use wasmtime::component::HasData;
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxView, WasiView};
 

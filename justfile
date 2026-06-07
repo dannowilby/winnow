@@ -20,8 +20,12 @@ build-components:
 server: dev-build
     cargo run -p server --bin mapreduce_bin
 
-run-local-cluster:
-    cd build && docker compose up
+# build the host binary, then bake it into the cluster image (no in-container compile)
+build-local-cluster: dev-build
+    cd build && docker compose build && cd ../
+
+run-local-cluster: build-local-cluster
+    cd build && docker compose up && cd ../
 
 test: dev-build
     cargo test -p server -- --no-capture

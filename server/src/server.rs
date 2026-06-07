@@ -1,13 +1,15 @@
 use std::{
     collections::HashMap,
+    error::Error,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use crate::{
     cluster::{Cluster, Host},
-    job_lookup::{self, JobLookup},
+    job_lookup::JobLookup,
     map::{MapRequest, MapResponse, handle_map},
+    prime::{PrimeRequest, Programs, handle_prime},
     promote::{PromoteRequest, handle_promote},
     query::{QueryRequest, QueryResponse, handle_query},
     reduce::{ReduceRequest, handle_reduce},
@@ -21,19 +23,25 @@ pub trait MapReduceService {
     /// Returns true if healthy, false otherwise.
     async fn heartbeat() -> bool;
 
-    async fn map(mp: MapRequest) -> MapResponse;
+    /// Resets the machine and stores the programs used by map and reduce.
+    async fn prime(pr: PrimeRequest) -> Result<(), String>;
 
-    async fn reduce(rr: ReduceRequest) -> ();
+    async fn map(mp: MapRequest) -> Result<MapResponse, String>;
+
+    async fn reduce(rr: ReduceRequest) -> Result<(), String>;
 
     async fn promote(pr: PromoteRequest) -> HashMap<String, Host>;
 
-    async fn query(q: QueryRequest) -> QueryResponse;
+    async fn query(q: QueryRequest) -> Result<QueryResponse, String>;
 }
 
 #[derive(Clone)]
 pub struct MapReduceServer<W: WasmEnv> {
     pub cluster: Arc<RwLock<Cluster>>,
     pub job_lookup: Arc<RwLock<JobLookup>>,
+
+    /// The programs primed via the `prime` endpoint, used by map and reduce.
+    pub programs: Arc<RwLock<Programs>>,
 
     pub wasm_env: W,
 }
@@ -42,11 +50,13 @@ impl<W: WasmEnv> MapReduceServer<W> {
     pub fn new(
         cluster: Arc<RwLock<Cluster>>,
         job_lookup: Arc<RwLock<JobLookup>>,
+        programs: Arc<RwLock<Programs>>,
         wasm_env: W,
     ) -> Self {
         Self {
             cluster,
             job_lookup,
+            programs,
             wasm_env,
         }
     }
@@ -58,20 +68,32 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
         true
     }
 
-    async fn map(self, _: context::Context, mp: MapRequest) -> MapResponse {
-        handle_map(self.wasm_env.clone(), mp).await
+    async fn prime(self, _: context::Context, pr: PrimeRequest) -> Result<(), String> {
+        handle_prime(self, pr)
+            .await
+            .map_err(|e| format!("{}\n{:?}", e.to_string(), e.source()))
     }
 
-    async fn reduce(self, _: context::Context, rr: ReduceRequest) -> () {
-        handle_reduce(self, rr).await
+    async fn map(self, _: context::Context, mp: MapRequest) -> Result<MapResponse, String> {
+        handle_map(self, mp)
+            .await
+            .map_err(|e| format!("{}\n{:?}", e.to_string(), e.source()))
+    }
+
+    async fn reduce(self, _: context::Context, rr: ReduceRequest) -> Result<(), String> {
+        handle_reduce(self, rr)
+            .await
+            .map_err(|e| format!("{}\n{:?}", e.to_string(), e.source()))
     }
 
     async fn promote(self, _: context::Context, pr: PromoteRequest) -> HashMap<String, Host> {
         handle_promote(self, pr).await
     }
 
-    async fn query(self, _: context::Context, q: QueryRequest) -> QueryResponse {
-        handle_query(self, q).await
+    async fn query(self, _: context::Context, q: QueryRequest) -> Result<QueryResponse, String> {
+        handle_query(self, q)
+            .await
+            .map_err(|e| format!("{}\n{:?}", e.to_string(), e.source()))
     }
 }
 

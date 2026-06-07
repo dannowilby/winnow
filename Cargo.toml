@@ -18,3 +18,4 @@ rmp-serde = "1.1.1"
 dlmalloc = { version = "0.2.13", features = ["global"] }
 dashmap = "6.1.0"
 rand = "0.10.1"
+thiserror = "2"

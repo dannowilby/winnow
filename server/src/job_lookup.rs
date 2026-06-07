@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::{cluster::Host, map::MapResponse};
 
@@ -41,7 +41,7 @@ impl JobLookup {
     }
 
     /// A stub for now.
-    pub fn complete_reduce_job(&mut self, partition: String) {}
+    pub fn complete_reduce_job(&mut self, _partition: String) {}
 
     pub fn get_host_by_index(&self, index: usize) -> &Host {
         self.mapping.get(&index).unwrap()
@@ -57,10 +57,7 @@ impl JobLookup {
             .iter()
             .filter(|(_, host)| &target_host == *host)
             .collect::<HashMap<&String, &Host>>();
-        partitions
-            .keys()
-            .map(|p| p.clone())
-            .collect::<Vec<&String>>()
+        partitions.keys().map(|p| *p).collect::<Vec<&String>>()
     }
 
     pub fn get_map_job_indices(&self, target_host: Host) -> Vec<usize> {

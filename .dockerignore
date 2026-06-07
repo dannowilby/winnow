@@ -1,0 +1,6 @@
+# The image only needs the pre-built binary and the cluster config, so exclude
+# everything else from the build context (notably the multi-GB target/ tree).
+*
+!target/debug/mapreduce_bin
+!target/release/mapreduce_bin
+!build/cluster.json

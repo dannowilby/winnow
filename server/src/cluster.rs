@@ -1,8 +1,5 @@
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
-
 use crate::server::MapReduceServiceClient;
 use futures::future::join_all;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tarpc::{client, tokio_serde::formats::Json};
 
@@ -92,11 +89,10 @@ impl Cluster {
             .collect::<Vec<_>>();
 
         if active.len() < 1 {
-            panic!();
+            panic!("No active members to get from!");
         }
 
         let index = rand::random_range(0..active.len());
-        println!("Random index/host: {}", index);
         active.get(index).unwrap()
     }
 

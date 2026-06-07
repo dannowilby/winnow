@@ -2,11 +2,22 @@ use std::{fs, time::Instant};
 
 use mapreduce::{
     cluster::ClusterList,
-    error::CliError,
     promote::PromoteRequest,
     query::{OutputData, QueryRequest, QueryResponse},
     server::context,
 };
+use tarpc::client::RpcError;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum CliError {
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    RpcError(#[from] RpcError),
+    #[error("{0}")]
+    Other(String),
+}
 
 #[tokio::main]
 async fn main() -> Result<(), CliError> {
@@ -16,11 +27,11 @@ async fn main() -> Result<(), CliError> {
             ("[::1]".to_owned(), 3001),
             ("[::1]".to_owned(), 3002),
         ],
-        0,
+        1,
     )
     .connect()
     .await;
-    println!("Here?");
+
     // Where you might find the wasm binaries:
     // let paths = fs::read_dir("./target/wasm32-wasip2/release").unwrap();
     // for path in paths {
@@ -65,9 +76,9 @@ async fn main() -> Result<(), CliError> {
             )
             .await?;
 
-        let QueryResponse::Data(d) = download else {
-            return Err(CliError::from(
-                "Error decoding successful query response, got some other QueryResponse variant",
+        let Ok(QueryResponse::Data(d)) = download else {
+            return Err(CliError::Other(
+                "data query gave an error as its response".to_owned(),
             ));
             // panic!();
         };

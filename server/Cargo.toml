@@ -30,3 +30,4 @@ dashmap = { workspace = true }
 ext-sort = "0.1.5"
 rmp-serde = { workspace = true }
 rand = { workspace = true }
+thiserror = { workspace = true }

@@ -4,7 +4,11 @@ use std::{
     io::{self, BufReader, Read, Write},
     iter::Peekable,
     marker::PhantomData,
+    time::Duration,
 };
+
+use thiserror::Error;
+use tokio::time::sleep;
 
 use ext_sort::{
     BinaryHeapMerger, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder, RmpExternalChunk,
@@ -12,7 +16,7 @@ use ext_sort::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cluster::{ActiveConnection, Cluster, Host},
+    cluster::Host,
     query::{IntermediateData, OutputData, QueryRequest, QueryResponse},
     server::{MapReduceServer, context},
     wasm::{WasmEnv, handle::reduce::ReduceFn},
@@ -23,35 +27,70 @@ pub struct ReduceRequest {
     pub partition: String,
     pub indices: Vec<usize>,
 
-    pub reduce_src: Vec<u8>,
-
     pub leader: Host,
 }
 
-pub async fn handle_reduce<W: WasmEnv>(server: MapReduceServer<W>, rr: ReduceRequest) {
+#[derive(Error, Debug)]
+pub enum ReduceError {
+    #[error("{0}")]
+    ConnectionError(String),
+    #[error(transparent)]
+    FileError(#[from] std::io::Error),
+    #[error(transparent)]
+    EncodeError(#[from] rmp_serde::encode::Error),
+    #[error(transparent)]
+    WasmError(#[from] wasmtime::error::Error),
+}
+
+pub async fn handle_reduce<W: WasmEnv>(
+    server: MapReduceServer<W>,
+    rr: ReduceRequest,
+) -> Result<(), ReduceError> {
     println!("Running reduce job for {}", &rr.partition);
 
     // if we're going to fail, at least fail before downloading everything
-    let mut reducer = server
-        .wasm_env
-        .load_reduce_binary(&rr.reduce_src)
-        .expect("Incorrect reduce binary received!");
+    let programs = server.programs.read().await;
+    let mut reducer = server.wasm_env.load_reduce_binary(&programs.reduce_src)?;
 
     let file_path = format!("data/{}-sorted", &rr.partition);
 
     let mut download_queue = VecDeque::from(rr.indices);
-    let leader = server
+    let mut leader = server
         .cluster
         .read()
         .await
         .get_unchecked(rr.leader.clone())
         .clone();
 
-    println!("Our download queue is: {:?}", &download_queue);
-
     while let Some(index) = download_queue.pop_front() {
-        // get the location of the data for index from the host
-        let QueryResponse::Host(data_host) = leader
+        // we need a functioning leader
+        let mut retry = 0;
+        let max_retries = 3;
+        while let None = leader.client
+            && retry < max_retries
+        {
+            retry = retry + 1;
+            server.cluster.write().await.reconnect().await;
+
+            leader = server
+                .cluster
+                .read()
+                .await
+                .get_unchecked(rr.leader.clone())
+                .clone();
+
+            sleep(Duration::from_secs(2_u64.pow(retry))).await;
+        }
+
+        // being unable to communicate with the leader is unrecoverable
+        if leader.client.is_none() {
+            return Err(ReduceError::ConnectionError(format!(
+                "leader ({:?}) failed to connect",
+                leader.host
+            )));
+        }
+
+        let Ok(QueryResponse::Host(data_host)) = leader
             .client
             .as_ref()
             .unwrap()
@@ -59,13 +98,29 @@ pub async fn handle_reduce<W: WasmEnv>(server: MapReduceServer<W>, rr: ReduceReq
             .await
             .unwrap()
         else {
-            println!("Downloading {} failed to query host!", index);
+            println!("[WARNING] Downloading {} failed to query host", index);
             download_queue.push_back(index);
             continue;
         };
 
-        // download the actual data
-        let target_connection = server.cluster.read().await.get_unchecked(data_host).clone();
+        // get and verify the connection, requeue the index if it looks like
+        // things have failed
+        let mut target_connection = server
+            .cluster
+            .read()
+            .await
+            .get_unchecked(data_host.clone())
+            .clone();
+        if target_connection.client.is_none() {
+            server.cluster.write().await.reconnect().await;
+            target_connection = server.cluster.read().await.get_unchecked(data_host).clone();
+
+            if target_connection.client.is_none() {
+                download_queue.push_back(index);
+                continue;
+            }
+        }
+
         let result = target_connection
             .client
             .as_ref()
@@ -76,8 +131,8 @@ pub async fn handle_reduce<W: WasmEnv>(server: MapReduceServer<W>, rr: ReduceReq
             )
             .await;
 
-        let Ok(QueryResponse::Data(data)) = result else {
-            println!("Downloading {} failed to download data!", index);
+        let Ok(Ok(QueryResponse::Data(data))) = result else {
+            println!("[WARNING]: Downloading {} failed to download data", index);
             download_queue.push_back(index);
             continue;
         };
@@ -86,21 +141,19 @@ pub async fn handle_reduce<W: WasmEnv>(server: MapReduceServer<W>, rr: ReduceReq
         let mut f = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(&file_path)
-            .expect("Could not access data");
-        let _ = f.write(&data);
+            .open(&file_path)?;
+        f.write(&data)?;
     }
 
     // Sort the data and create an iterator over it
-    let mut sorted = external_sort(&file_path);
+    let mut sorted = external_sort(&file_path)?;
 
     // create our final output file
     let output_file_path = format!("data/{}-output", rr.partition);
     let mut output_file = OpenOptions::new()
         .append(true)
         .create(true)
-        .open(output_file_path)
-        .expect("output has to go somehwere");
+        .open(output_file_path)?;
 
     // iterate over sorted kv pairs and fold with the reducer
     let mut acc = Vec::<u8>::new();
@@ -109,19 +162,15 @@ pub async fn handle_reduce<W: WasmEnv>(server: MapReduceServer<W>, rr: ReduceReq
     while let Some(Ok(item)) = sorted.next() {
         // println!("item: {}", rmp_serde::from_slice::<i32>(&item.value).expect("l"));
         key = item.key.clone();
-        acc = tokio::task::block_in_place(|| {
-            reducer
-                .reduce(&item.key, &item.value, &acc)
-                .expect("Reducer failed")
-        });
+        acc = tokio::task::block_in_place(|| reducer.reduce(&item.key, &item.value, &acc))?;
 
         // println!("[Reducer] acc is now: {}", rmp_serde::from_slice::<i32>(&acc).expect("j"));
 
         if let Some(Ok(next_item)) = sorted.peek() {
             if next_item.key != item.key {
                 let output = OutputData(item.key, acc);
-                let b = rmp_serde::to_vec(&output).expect("should be able to encode output data");
-                let _ = output_file.write(&b);
+                let b = rmp_serde::to_vec(&output)?;
+                output_file.write(&b)?;
 
                 acc = Vec::new();
             }
@@ -129,25 +178,27 @@ pub async fn handle_reduce<W: WasmEnv>(server: MapReduceServer<W>, rr: ReduceReq
     }
 
     let output = OutputData(key, acc);
-    let b = rmp_serde::to_vec(&output).expect("should be able to encode output data");
-    let _ = output_file.write(&b);
+    let b = rmp_serde::to_vec(&output)?;
+    output_file.write(&b)?;
+
+    Ok(())
 }
 
 fn external_sort(
     file_path: &str,
-) -> Peekable<
-    BinaryHeapMerger<
-        IntermediateData,
-        rmp_serde::decode::Error,
-        fn(&IntermediateData, &IntermediateData) -> std::cmp::Ordering,
-        RmpExternalChunk<IntermediateData>,
+) -> Result<
+    Peekable<
+        BinaryHeapMerger<
+            IntermediateData,
+            rmp_serde::decode::Error,
+            fn(&IntermediateData, &IntermediateData) -> std::cmp::Ordering,
+            RmpExternalChunk<IntermediateData>,
+        >,
     >,
+    std::io::Error,
 > {
-    let sort_file = fs::File::open(&file_path).expect("Could not open data file");
-    let file_size = sort_file
-        .metadata()
-        .expect("Could not read file metadata")
-        .len();
+    let sort_file = fs::File::open(&file_path)?;
+    let file_size = sort_file.metadata()?.len();
     let reader = BufReader::new(sort_file).take(file_size);
     let iter: RmpIter<IntermediateData> = RmpIter {
         reader,
@@ -161,13 +212,13 @@ fn external_sort(
             .build()
             .expect("Could not build sorter");
 
-    sorter
+    Ok(sorter
         .sort_by(
             iter,
             cmp_intermediate as fn(&IntermediateData, &IntermediateData) -> std::cmp::Ordering,
         )
         .expect("Could not sort data")
-        .peekable()
+        .peekable())
 }
 
 struct RmpIter<T> {
