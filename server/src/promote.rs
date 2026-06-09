@@ -186,7 +186,7 @@ async fn spawn_initial_map_jobs<W: WasmEnv>(
 ) -> usize {
     // Store index + host and create request futures
     for (index, keys) in split_input_iter(pr.m, &pr.keys) {
-        let cluster = server.cluster.read().await;
+        let mut cluster = server.cluster.write().await;
         let connection = cluster.get_random();
 
         server
@@ -214,7 +214,7 @@ async fn spawn_initial_reduce_jobs<W: WasmEnv>(
     drop(job_lookup);
 
     for (partition, indices) in partitions {
-        let cluster = server.cluster.read().await;
+        let mut cluster = server.cluster.write().await;
         let connection = cluster.get_random().clone();
         let leader = cluster.get_loopback().host.clone();
         drop(cluster);

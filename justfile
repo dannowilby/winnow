@@ -11,6 +11,9 @@ dev-build:
 cli: dev-build
     cargo run -p server --bin mapreduce_cli
 
+coverage:
+    cargo llvm-cov -p server
+
 build-components:
     cargo build -p read --target=wasm32-wasip2 --release
     cargo build -p map --target=wasm32-wasip2 --release

@@ -1,5 +1,6 @@
 use crate::server::MapReduceServiceClient;
 use futures::future::join_all;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use tarpc::{client, tokio_serde::formats::Json};
 
@@ -28,7 +29,12 @@ pub struct ClusterList {
 pub struct Cluster {
     members: Vec<ActiveConnection>,
     loopback: usize,
+    rng: StdRng,
 }
+
+const SEED: [u8; 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
 
 impl ClusterList {
     pub fn new(members: Vec<(String, u16)>, loopback: usize) -> Self {
@@ -75,13 +81,14 @@ impl ClusterList {
         Cluster {
             members: instances,
             loopback: self.loopback,
+            rng: StdRng::from_seed(SEED),
         }
     }
 }
 
 impl Cluster {
     /// Get a random, non-failed host's connection.
-    pub fn get_random(&self) -> &ActiveConnection {
+    pub fn get_random(&mut self) -> &ActiveConnection {
         let active = self
             .members
             .iter()
@@ -92,7 +99,7 @@ impl Cluster {
             panic!("No active members to get from!");
         }
 
-        let index = rand::random_range(0..active.len());
+        let index = self.rng.random_range(0..active.len());
         active.get(index).unwrap()
     }
 
