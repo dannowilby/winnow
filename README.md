@@ -1,4 +1,6 @@
-# Rust MapReduce
+# Winnow
+> "to separate grain from chaff"
+
 A Rust implementation of Google's MapReduce with WASM-powered user programs.
 
 ## Quick start
