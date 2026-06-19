@@ -6,7 +6,7 @@ use futures::future::join_all;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 
-/// Represents the address of a machine, ie. "[::1]:3000"
+/// Represents the address of a machine (ipv6 + port)
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct Host {
     #[serde(alias = "host")]
