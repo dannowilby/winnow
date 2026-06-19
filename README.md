@@ -3,6 +3,8 @@
 
 A Rust implementation of Google's MapReduce with WASM-powered user programs.
 
+![codecov](https://codecov.io/github/dannowilby/winnow/graph/badge.svg) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](#license)
+
 ## Quick start
 
 ## Getting started
