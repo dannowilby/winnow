@@ -6,7 +6,7 @@ use mapreduce::wasm::{DefaultWasmEnv, WasmEnv, handle::reduce::ReduceFn};
 
 #[tokio::test]
 async fn reduce_component_runs_async() {
-    let binary = std::fs::read("../target/wasm32-wasip2/release/reduce.wasm")
+    let binary = std::fs::read("./tests/data/reduce.wasm")
         .expect("build components first: `just build-components`");
 
     let env = DefaultWasmEnv::new().expect("create wasm env");

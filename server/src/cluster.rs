@@ -129,9 +129,6 @@ impl Cluster {
     }
 
     /// Marks a host as failed.
-    ///
-    /// Subsequent [get](crate::cluster::Cluster::get) calls will not return
-    /// this host.
     pub fn signal_fail(&mut self, host: Host) {
         self.get_mut_unchecked(host).client = None;
     }
