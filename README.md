@@ -1,5 +1,7 @@
-# Rust MapReduce
-A Rust implementation of Google's MapReduce.
+# Winnow
+> "to separate grain from chaff"
+
+A Rust implementation of Google's MapReduce with WASM-powered user programs.
 
 ## Quick start
 
@@ -19,6 +21,5 @@ A Rust implementation of Google's MapReduce.
 
 4. Hit enter. The CLI will start the job and show you a live view of its progress.
 
-## Features
-
-##
+## Status
+The system is functional, but is currently undergoing hardening for better fault tolerance. Expect many changes to the CLI!
