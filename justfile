@@ -1,37 +1,35 @@
 #!/usr/bin/env just --justfile
 
-# build the server and wasm binaries in release mode
-build:
-    cargo build -p server --release
+# build the server
+build-server *FLAGS:
+    cargo build -p server {{FLAGS}}
 
-# build the server and wasm binaries
-dev-build:
-    cargo build -p server
-
-cli: dev-build
-    cargo run -p server --bin mapreduce_cli
-
-coverage:
-    cargo llvm-cov -p server
-
+# build wasm components in release
 build-components:
     cargo build -p read --target=wasm32-wasip2 --release
     cargo build -p map --target=wasm32-wasip2 --release
     cargo build -p reduce --target=wasm32-wasip2 --release
     cargo build -p partition --target=wasm32-wasip2 --release
 
-server: dev-build
-    cargo run -p server --bin mapreduce_bin
+# build the server and wasm binaries
+build *FLAGS: (build-server FLAGS) build-components
 
-# build the host binary, then bake it into the cluster image (no in-container compile)
-build-local-cluster: dev-build
-    cd build && docker compose build && cd ../
+# run the cli to start a job
+cli:
+    cargo run -p server --bin mapreduce_cli
 
-run-local-cluster: build-local-cluster
-    cd build && docker compose up && cd ../
+coverage:
+    cargo llvm-cov nextest -p server
 
-test: dev-build
-    cargo test -p server -- --no-capture
 
-check:
-    cargo check --workspace
+run-local-cluster: build
+    cd build
+    docker compose build
+    docker compose up 
+    cd ../
+
+fmt:
+    cargo fmt --all -- --check
+
+clippy:
+    cargo clippy -- -D warnings

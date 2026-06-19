@@ -39,7 +39,10 @@ pub async fn handle_reduce<W: WasmEnv>(
     server: MapReduceServer<W>,
     rr: ReduceRequest,
 ) -> Result<(), ReduceError> {
-    println!("Running reduce job for {}", &rr.partition);
+    println!("Running reduce job for {}", rr.partition);
+
+    server.storage.clear_reduce_in(&rr.partition)?;
+    server.storage.clear_reduce_out(&rr.partition)?;
 
     // if we're going to fail, at least fail before downloading everything
     let programs = server.programs.read().await;
@@ -63,7 +66,7 @@ pub async fn handle_reduce<W: WasmEnv>(
         while let None = leader.client
             && retry < max_retries
         {
-            retry = retry + 1;
+            retry += 1;
             server.cluster.write().await.reconnect().await;
 
             leader = server
@@ -84,6 +87,26 @@ pub async fn handle_reduce<W: WasmEnv>(
             )));
         }
 
+        // check the status of the job, we don't want to download incomplete
+        // data (important for fault tolerance)
+        let Ok(QueryResponse::Status(true)) = leader
+            .client
+            .as_ref()
+            .unwrap()
+            .query(
+                context(),
+                QueryRequest::IsMapJobComplete(index, rr.partition.clone()),
+            )
+            .await
+            .unwrap()
+        else {
+            println!("[WARNING] {} has not completed yet", index);
+            download_queue.push_back(index);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        };
+
+        // Find where to download from
         let Ok(QueryResponse::Host(data_host)) = leader
             .client
             .as_ref()
@@ -94,6 +117,7 @@ pub async fn handle_reduce<W: WasmEnv>(
         else {
             println!("[WARNING] Downloading {} failed to query host", index);
             download_queue.push_back(index);
+            tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         };
 
@@ -126,10 +150,19 @@ pub async fn handle_reduce<W: WasmEnv>(
             .await;
 
         let Ok(Ok(QueryResponse::Data(data))) = result else {
-            println!("[WARNING]: Downloading {} failed to download data", index);
+            println!(
+                "[WARNING]: Downloading {} from {:?} failed to download data",
+                index, target_connection.host
+            );
             download_queue.push_back(index);
+            tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         };
+
+        println!(
+            "[INFO]: {}-{}, {:?} downloaded data from {:?}",
+            rr.partition, index, leader.host, target_connection.host
+        );
 
         server
             .storage
@@ -146,21 +179,18 @@ pub async fn handle_reduce<W: WasmEnv>(
 
     let mut key: String = "".to_owned();
     while let Some(Ok(item)) = sorted.next() {
-        // println!("item: {}", rmp_serde::from_slice::<i32>(&item.value).expect("l"));
         key = item.key.clone();
         acc = reducer.reduce(&item.key, &item.value, &acc).await?;
 
-        // println!("[Reducer] acc is now: {}", rmp_serde::from_slice::<i32>(&acc).expect("j"));
+        if let Some(Ok(next_item)) = sorted.peek()
+            && next_item.key != item.key
+        {
+            let output = OutputData(item.key, acc);
+            server
+                .storage
+                .append_reduce_out(rr.partition.clone(), output)?;
 
-        if let Some(Ok(next_item)) = sorted.peek() {
-            if next_item.key != item.key {
-                let output = OutputData(item.key, acc);
-                server
-                    .storage
-                    .append_reduce_out(rr.partition.clone(), output)?;
-
-                acc = Vec::new();
-            }
+            acc = Vec::new();
         }
     }
 

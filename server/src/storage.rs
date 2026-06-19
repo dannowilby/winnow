@@ -42,7 +42,7 @@ pub type ReduceSortedIter = Peekable<
     >,
 >;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct IntermediateData {
     pub key: String,
     pub value: Vec<u8>,
@@ -69,6 +69,7 @@ impl Storage {
 
     pub fn reset(&self) -> Result<(), StorageError> {
         self.clear()?;
+        std::fs::create_dir_all(&self.root)?;
         std::fs::create_dir_all("./data")?;
         Ok(())
     }
@@ -86,7 +87,7 @@ impl Storage {
 
         let encoded = rmp_serde::to_vec(&data)?;
 
-        file.write(&encoded)?;
+        let _ = file.write(&encoded)?;
 
         Ok(())
     }
@@ -102,7 +103,18 @@ impl Storage {
             .append(true)
             .create(true)
             .open(&file_path)?;
-        f.write(&data)?;
+        let _ = f.write(&data)?;
+
+        Ok(())
+    }
+
+    pub fn clear_reduce_in(&self, partition: &String) -> Result<(), StorageError> {
+        let file_path = format!("{}/sor-{}", self.root, partition);
+        let Ok(true) = std::fs::exists(file_path.clone()) else {
+            return Ok(());
+        };
+
+        std::fs::remove_file(file_path)?;
 
         Ok(())
     }
@@ -111,7 +123,7 @@ impl Storage {
         &self,
         partition: String,
     ) -> Result<ReduceSortedIter, StorageError> {
-        let sort_file = std::fs::File::open(&format!("{}/sor-{}", self.root, partition))?;
+        let sort_file = std::fs::File::open(format!("{}/sor-{}", self.root, partition))?;
         let file_size = sort_file.metadata()?.len();
         let reader = BufReader::new(sort_file).take(file_size);
         let iter: RmpIter<IntermediateData> = RmpIter {
@@ -149,7 +161,18 @@ impl Storage {
 
         let output = rmp_serde::to_vec(&data)?;
 
-        output_file.write(&output)?;
+        let _ = output_file.write(&output)?;
+
+        Ok(())
+    }
+
+    pub fn clear_reduce_out(&self, partition: &String) -> Result<(), StorageError> {
+        let file_path = format!("{}/out-{}", self.root, partition);
+        let Ok(true) = std::fs::exists(file_path.clone()) else {
+            return Ok(());
+        };
+
+        std::fs::remove_file(file_path)?;
 
         Ok(())
     }

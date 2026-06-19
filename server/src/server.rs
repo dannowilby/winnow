@@ -76,19 +76,19 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
     async fn prime(self, _: context::Context, pr: PrimeRequest) -> Result<(), String> {
         handle_prime(self, pr)
             .await
-            .map_err(|e| format!("{}\n{:?}", e.to_string(), e.source()))
+            .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
     async fn map(self, _: context::Context, mp: MapRequest) -> Result<MapResponse, String> {
         handle_map(self, mp)
             .await
-            .map_err(|e| format!("{}\n{:?}", e.to_string(), e.source()))
+            .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
     async fn reduce(self, _: context::Context, rr: ReduceRequest) -> Result<(), String> {
         handle_reduce(self, rr)
             .await
-            .map_err(|e| format!("{}\n{:?}", e.to_string(), e.source()))
+            .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
     async fn promote(self, _: context::Context, pr: PromoteRequest) -> HashMap<String, Host> {
@@ -98,7 +98,7 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
     async fn query(self, _: context::Context, q: QueryRequest) -> Result<QueryResponse, String> {
         handle_query(self, q)
             .await
-            .map_err(|e| format!("{}\n{:?}", e.to_string(), e.source()))
+            .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 }
 

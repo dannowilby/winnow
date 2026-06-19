@@ -5,7 +5,7 @@ use wit_bindgen::generate;
 
 generate!("reader" in "../../wit/world.wit");
 
-use mapreduce::typeimpls::logging::log;
+// use mapreduce::typeimpls::logging::log;
 
 struct ReaderComponent;
 

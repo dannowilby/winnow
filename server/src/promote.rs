@@ -95,7 +95,8 @@ pub async fn handle_promote<W: WasmEnv>(
                 sent_initial_reduce_jobs = true;
                 total_reduce_jobs = spawn_initial_reduce_jobs(&mut events, &server, &pr).await;
             }
-            LeaderEvent::ReduceComplete(partition, _host) => {
+            LeaderEvent::ReduceComplete(partition, host) => {
+                println!("[INFO]: Reduce job completed on {:?}", host);
                 let mut job_lookup = server.job_lookup.write().await;
                 job_lookup.complete_reduce_job(partition);
 
@@ -225,8 +226,12 @@ async fn spawn_initial_reduce_jobs<W: WasmEnv>(
             .await
             .create_reduce_job(partition.clone(), connection.host.clone());
 
-        let request_future =
-            send_reduce_request(connection.clone(), leader, partition, indices.clone());
+        let request_future = send_reduce_request(
+            connection.clone(),
+            leader,
+            partition,
+            indices.iter().cloned().collect(),
+        );
         events.spawn(request_future);
     }
 
@@ -245,16 +250,24 @@ async fn handle_machine_failure<W: WasmEnv>(
     let mut cluster = server.cluster.write().await;
     let mut job_lookup = server.job_lookup.write().await;
 
+    println!("[WARNING]: Host at {:?} failed", host.clone());
+
     cluster.signal_fail(host.clone());
 
     // Resend map jobs to new machines
     let lost_map_jobs = job_lookup.get_map_job_indices(host.clone());
     let delta_map_jobs = lost_map_jobs.len();
     for index in &lost_map_jobs {
+        // check if this map job is already running somewhere else
+        if job_lookup.get_host_by_index(*index) != &host {
+            // if it is, just move on to the next
+            continue;
+        }
+
         let keys = get_split_at_index(pr.m, &pr.keys, *index);
 
         let connection = cluster.get_random();
-
+        job_lookup.signal_map_job_failure(*index);
         job_lookup.create_map_job(*index, connection.host.clone());
 
         let request_future = send_map_request(connection.clone(), pr.clone(), *index, keys.into());
@@ -270,17 +283,23 @@ async fn handle_machine_failure<W: WasmEnv>(
         .clone();
     let delta_reduce_jobs = lost_reduce_jobs.len();
     for partition in lost_reduce_jobs {
+        // check if we've already requeued the reduce job
+        if job_lookup.get_host_by_partition(&partition).unwrap() != &host {
+            continue;
+        }
+
         let indices = job_lookup.get_indices_for_partition(&partition).clone();
 
         let connection = cluster.get_random();
 
-        job_lookup.create_reduce_job(partition.clone(), host.clone());
+        job_lookup.signal_reduce_job_failure(&partition);
+        job_lookup.create_reduce_job(partition.clone(), connection.host.clone());
 
         let request_future = send_reduce_request(
             connection.clone(),
             cluster.get_loopback().host.clone(),
             partition.clone(),
-            indices,
+            indices.iter().cloned().collect(),
         );
         events.spawn(request_future);
     }
@@ -340,7 +359,7 @@ async fn send_map_request(
                 return LeaderEvent::MachineFailure(connection.host.clone());
             }
 
-            return LeaderEvent::MapComplete(response.unwrap(), connection.host.clone());
+            LeaderEvent::MapComplete(response.unwrap(), connection.host.clone())
         }
         Err(_) => LeaderEvent::MachineFailure(connection.host.clone()),
     }
@@ -384,14 +403,14 @@ async fn send_reduce_request(
     }
 }
 
-pub fn split_input_iter(m: u32, key_list: &[String]) -> impl Iterator<Item = (usize, &[String])> {
+fn split_input_iter(m: u32, key_list: &[String]) -> impl Iterator<Item = (usize, &[String])> {
     let n = key_list.len();
     let segments = n.div_ceil(m as usize);
 
     key_list.chunks(segments).enumerate()
 }
 
-pub fn get_split_at_index(m: u32, key_list: &[String], index: usize) -> &[String] {
+fn get_split_at_index(m: u32, key_list: &[String], index: usize) -> &[String] {
     let n = key_list.len();
     let segments = n.div_ceil(m as usize);
 
@@ -399,4 +418,14 @@ pub fn get_split_at_index(m: u32, key_list: &[String], index: usize) -> &[String
     let end = (start + segments).min(n);
 
     &key_list[start..end]
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn split_input_iter_returns_correct_data() {}
+
+    #[test]
+    fn get_split_at_index_returns_correct_data() {}
 }

@@ -10,6 +10,7 @@ pub struct DownloadRequest {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum QueryRequest {
+    IsMapJobComplete(usize, String),
     /// Returns a blob of data that can be decoded into a vec of [IntermediateData](crate::storage::IntermediateData)
     DownloadMapOutput(usize, String),
     /// Returns a blob of data that can be decoded into a vec of [OutputData](crate::storage::OutputData)
@@ -21,12 +22,15 @@ pub enum QueryRequest {
 pub enum QueryResponse {
     Data(Vec<u8>),
     Host(Host),
+    Status(bool),
 }
 
 #[derive(Error, Debug)]
 pub enum QueryError {
     #[error(transparent)]
     StorageError(#[from] StorageError),
+    #[error("no host found for map index {0}")]
+    IndexNotFound(usize),
 }
 
 pub async fn handle_query<W: WasmEnv>(
@@ -34,7 +38,16 @@ pub async fn handle_query<W: WasmEnv>(
     q: QueryRequest,
 ) -> Result<QueryResponse, QueryError> {
     match q {
+        QueryRequest::IsMapJobComplete(index, partition) => Ok(QueryResponse::Status(
+            server
+                .job_lookup
+                .read()
+                .await
+                .is_map_job_complete(&partition, index),
+        )),
+
         QueryRequest::DownloadMapOutput(index, partition) => {
+            // TODO: check that the job has completed first
             let data = server.storage.get_map_out(index, partition)?;
             Ok(QueryResponse::Data(data))
         }
@@ -42,13 +55,15 @@ pub async fn handle_query<W: WasmEnv>(
             let data = server.storage.get_reduce_out(partition)?;
             Ok(QueryResponse::Data(data))
         }
-        QueryRequest::IndexLocation(index) => Ok(QueryResponse::Host(
-            server
+        QueryRequest::IndexLocation(index) => {
+            let host = server
                 .job_lookup
                 .read()
                 .await
-                .get_host_by_index(index)
-                .clone(),
-        )),
+                .try_get_host_by_index(index)
+                .cloned()
+                .ok_or(QueryError::IndexNotFound(index))?;
+            Ok(QueryResponse::Host(host))
+        }
     }
 }

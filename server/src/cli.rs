@@ -1,4 +1,4 @@
-use std::{fs, time::Instant};
+use std::{fs, sync::Arc, time::Instant};
 
 use mapreduce::{
     cluster::ClusterList,
@@ -6,6 +6,7 @@ use mapreduce::{
     query::{QueryRequest, QueryResponse},
     server::context,
     storage::OutputData,
+    transport::TcpConnector,
 };
 use tarpc::client::RpcError;
 use thiserror::Error;
@@ -29,6 +30,7 @@ async fn main() -> Result<(), CliError> {
             ("[::1]".to_owned(), 3002),
         ],
         1,
+        Arc::new(TcpConnector),
     )
     .connect()
     .await;
@@ -46,7 +48,7 @@ async fn main() -> Result<(), CliError> {
         partition_src: fs::read("./target/wasm32-wasip2/release/partition.wasm")?,
         m: 5,
         r: 2,
-        keys: vec!["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+        keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
             .iter()
             .map(|k| String::from(*k))
             .collect::<Vec<String>>(),

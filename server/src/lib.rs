@@ -1,5 +1,6 @@
 pub mod cluster;
 pub mod server;
+pub mod transport;
 pub mod wasm;
 
 pub mod job_lookup;

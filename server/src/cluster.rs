@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use crate::server::MapReduceServiceClient;
+use crate::transport::Connector;
 use futures::future::join_all;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use tarpc::{client, tokio_serde::formats::Json};
 
 /// Represents the address of a machine, ie. "[::1]:3000"
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -19,17 +21,18 @@ pub struct ActiveConnection {
     pub client: Option<MapReduceServiceClient>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClusterList {
     members: Vec<Host>,
     loopback: usize,
+    connector: Arc<dyn Connector>,
 }
 
-#[derive(Debug)]
 pub struct Cluster {
     members: Vec<ActiveConnection>,
     loopback: usize,
     rng: StdRng,
+    connector: Arc<dyn Connector>,
 }
 
 const SEED: [u8; 32] = [
@@ -37,51 +40,49 @@ const SEED: [u8; 32] = [
 ];
 
 impl ClusterList {
-    pub fn new(members: Vec<(String, u16)>, loopback: usize) -> Self {
+    pub fn new(
+        members: Vec<(String, u16)>,
+        loopback: usize,
+        connector: Arc<dyn Connector>,
+    ) -> Self {
         Self {
             members: members
                 .into_iter()
                 .map(|(domain, port)| Host { domain, port })
                 .collect(),
             loopback,
+            connector,
         }
     }
 
     /// Build a cluster list directly from already-parsed [Host]s, e.g. ones
     /// deserialized from a `cluster.json` file.
-    pub fn from_hosts(members: Vec<Host>, loopback: usize) -> Self {
-        Self { members, loopback }
+    pub fn from_hosts(members: Vec<Host>, loopback: usize, connector: Arc<dyn Connector>) -> Self {
+        Self {
+            members,
+            loopback,
+            connector,
+        }
     }
 
-    /// For now, each cluster is assumed to be over TCP. Changing this method
-    /// should not be hard. We also ignore any failed connections and try to
-    /// continue on without that machine
+    /// Connects to every member through the configured [Connector]. We ignore
+    /// any failed connections and continue on without that machine.
     pub async fn connect(self) -> Cluster {
-        let conn_futs = self.members.into_iter().map(|host| async move {
-            let mut transport = tarpc::serde_transport::tcp::connect(
-                format!("{}:{}", &host.domain, host.port),
-                Json::default,
-            );
-            transport.config_mut().max_frame_length(usize::MAX);
+        let connector = self.connector;
 
-            (host, transport.await)
+        let conn_futs = self.members.into_iter().map(|host| {
+            let connector = connector.clone();
+            async move {
+                let client = connector.connect(&host).await;
+                ActiveConnection { host, client }
+            }
         });
 
-        let mut instances = Vec::new();
-
-        for (host, transport_result) in join_all(conn_futs).await.into_iter() {
-            let mut client = None;
-            if let Ok(transport) = transport_result {
-                client =
-                    Some(MapReduceServiceClient::new(client::Config::default(), transport).spawn());
-            }
-            instances.push(ActiveConnection { host, client });
-        }
-
         Cluster {
-            members: instances,
+            members: join_all(conn_futs).await,
             loopback: self.loopback,
             rng: StdRng::from_seed(SEED),
+            connector,
         }
     }
 }
@@ -95,7 +96,7 @@ impl Cluster {
             .filter(|connection| connection.client.is_some())
             .collect::<Vec<_>>();
 
-        if active.len() < 1 {
+        if active.is_empty() {
             panic!("No active members to get from!");
         }
 
@@ -135,24 +136,17 @@ impl Cluster {
         self.get_mut_unchecked(host).client = None;
     }
 
-    /// Tries to reconnect to the failed connections.
+    /// Tries to reconnect to the failed connections through the configured
+    /// [Connector].
     pub async fn reconnect(&mut self) {
+        let connector = self.connector.clone();
         for ActiveConnection { host, client } in self.members.iter_mut() {
             // leave unfailed connection unchanged
             if client.is_some() {
                 continue;
             }
 
-            let mut transport = tarpc::serde_transport::tcp::connect(
-                format!("{}:{}", &host.domain, host.port),
-                Json::default,
-            );
-            transport.config_mut().max_frame_length(usize::MAX);
-
-            if let Ok(transport) = transport.await {
-                *client =
-                    Some(MapReduceServiceClient::new(client::Config::default(), transport).spawn());
-            }
+            *client = connector.connect(host).await;
         }
     }
 
