@@ -93,10 +93,7 @@ pub async fn handle_reduce<W: WasmEnv>(
             .client
             .as_ref()
             .unwrap()
-            .query(
-                context(),
-                QueryRequest::IsMapJobComplete(index, rr.partition.clone()),
-            )
+            .query(context(), QueryRequest::IsMapJobComplete(index))
             .await
             .unwrap()
         else {

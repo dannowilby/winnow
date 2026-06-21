@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{cluster::Host, server::MapReduceServer, storage::StorageError, wasm::WasmEnv};
+use crate::{
+    cluster::Host, job_lookup::Progress, server::MapReduceServer, storage::StorageError,
+    wasm::WasmEnv,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DownloadRequest {
@@ -10,12 +13,14 @@ pub struct DownloadRequest {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum QueryRequest {
-    IsMapJobComplete(usize, String),
+    IsMapJobComplete(usize),
     /// Returns a blob of data that can be decoded into a vec of [IntermediateData](crate::storage::IntermediateData)
     DownloadMapOutput(usize, String),
     /// Returns a blob of data that can be decoded into a vec of [OutputData](crate::storage::OutputData)
     DownloadReduceOutput(String),
     IndexLocation(usize),
+
+    JobProgress,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -23,6 +28,7 @@ pub enum QueryResponse {
     Data(Vec<u8>),
     Host(Host),
     Status(bool),
+    Progress(Progress),
 }
 
 #[derive(Error, Debug)]
@@ -38,12 +44,12 @@ pub async fn handle_query<W: WasmEnv>(
     q: QueryRequest,
 ) -> Result<QueryResponse, QueryError> {
     match q {
-        QueryRequest::IsMapJobComplete(index, partition) => Ok(QueryResponse::Status(
-            server
-                .job_lookup
-                .read()
-                .await
-                .is_map_job_complete(&partition, index),
+        QueryRequest::IsMapJobComplete(index) => Ok(QueryResponse::Status(
+            server.job_lookup.read().await.is_map_job_complete(index),
+        )),
+
+        QueryRequest::JobProgress => Ok(QueryResponse::Progress(
+            server.job_lookup.read().await.progress.clone(),
         )),
 
         QueryRequest::DownloadMapOutput(index, partition) => {

@@ -164,6 +164,7 @@ async fn prime_cluster<W: WasmEnv>(server: &MapReduceServer<W>, pr: &PromoteRequ
     });
 
     join_all(prime_futures).await;
+    server.job_lookup.write().await.signal_primed();
 }
 
 async fn spawn_initial_heartbeats<W: WasmEnv>(

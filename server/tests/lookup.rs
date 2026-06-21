@@ -43,11 +43,11 @@ fn complete_map_job_accumulates_indices_per_partition() {
     lookup.complete_map_job(complete(0, &["odd", "even"]));
     lookup.complete_map_job(complete(1, &["odd"]));
 
-    assert!(lookup.is_map_job_complete(&"odd".to_owned(), 0));
-    assert!(lookup.is_map_job_complete(&"odd".to_owned(), 1));
-    assert!(lookup.is_map_job_complete(&"even".to_owned(), 0));
+    assert!(lookup.partition.get("odd").unwrap().contains(&0));
+    assert!(lookup.partition.get("odd").unwrap().contains(&1));
+    assert!(lookup.partition.get("even").unwrap().contains(&0));
     // index 1 never produced "even"
-    assert!(!lookup.is_map_job_complete(&"even".to_owned(), 1));
+    assert!(!lookup.partition.get("even").unwrap().contains(&1));
 
     assert_eq!(
         lookup.get_indices_for_partition(&"odd".to_owned()),
@@ -58,7 +58,7 @@ fn complete_map_job_accumulates_indices_per_partition() {
 #[test]
 fn is_map_job_complete_false_for_unknown_partition() {
     let lookup = JobLookup::new();
-    assert!(!lookup.is_map_job_complete(&"odd".to_owned(), 0));
+    assert!(!lookup.is_map_job_complete(0));
 }
 
 /// The key fault-tolerance invariant: a map job failure forgets where the index
@@ -76,7 +76,7 @@ fn signal_map_job_failure_forgets_location_but_keeps_partition_membership() {
     // The location is gone...
     assert!(lookup.try_get_host_by_index(0).is_none());
     // ...but the partition still knows index 0 feeds it.
-    assert!(lookup.is_map_job_complete(&"odd".to_owned(), 0));
+    assert!(lookup.is_map_job_complete(0));
     assert!(
         lookup
             .get_indices_for_partition(&"odd".to_owned())
@@ -146,6 +146,6 @@ fn clear_empties_all_state() {
     lookup.clear();
 
     assert!(lookup.try_get_host_by_index(0).is_none());
-    assert!(!lookup.is_map_job_complete(&"odd".to_owned(), 0));
+    assert!(!lookup.is_map_job_complete(0));
     assert!(lookup.get_host_by_partition(&"odd".to_owned()).is_none());
 }

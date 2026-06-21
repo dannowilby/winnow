@@ -77,19 +77,6 @@ pub async fn handle_map<W: WasmEnv>(
 
     let seen_partitions = seen_partitions.into_iter().collect::<Vec<String>>();
 
-    // Record completion locally so this machine, as a data host, can answer
-    // `DownloadMapOutput` queries: the query guard only serves output for jobs
-    // it knows finished. Until this runs, the (possibly partial) output stays
-    // unservable and reducers requeue the index.
-    server
-        .job_lookup
-        .write()
-        .await
-        .complete_map_job(MapResponse {
-            index: mp.index,
-            seen_partitions: seen_partitions.clone(),
-        });
-
     Ok(MapResponse {
         index: mp.index,
         seen_partitions,

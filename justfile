@@ -15,18 +15,16 @@ build-components:
 build *FLAGS: (build-server FLAGS) build-components
 
 # run the cli to start a job
-cli:
-    cargo run -p server --bin mapreduce_cli
+cli *FLAGS:
+    cargo run -p server --bin mapreduce_cli -- {{FLAGS}}
 
 coverage:
     cargo llvm-cov nextest -p server
 
 
 run-local-cluster: build
-    cd build
-    docker compose build
-    docker compose up 
-    cd ../
+    docker compose -f build/docker-compose.yaml build
+    docker compose -f build/docker-compose.yaml up
 
 fmt:
     cargo fmt --all -- --check

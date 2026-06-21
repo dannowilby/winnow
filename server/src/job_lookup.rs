@@ -1,6 +1,19 @@
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{cluster::Host, map::MapResponse};
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct Progress {
+    pub total_map_jobs: usize,
+    pub completed_map_jobs: usize,
+
+    pub total_reduce_jobs: usize,
+    pub completed_reduce_jobs: usize,
+
+    pub primed: bool,
+}
 
 #[derive(Default)]
 pub struct JobLookup {
@@ -12,6 +25,8 @@ pub struct JobLookup {
 
     /// Maps a host to the partition
     pub reducing: HashMap<String, Host>,
+
+    pub progress: Progress,
 }
 
 impl JobLookup {
@@ -19,21 +34,29 @@ impl JobLookup {
         Self::default()
     }
 
+    pub fn signal_primed(&mut self) {
+        self.progress.primed = true;
+    }
+
     pub fn create_map_job(&mut self, index: usize, host: Host) {
         self.mapping.insert(index, host);
+        self.progress.total_map_jobs += 1;
     }
 
     pub fn signal_map_job_failure(&mut self, index: usize) {
-        // Only the index's *location* is lost on a host failure; it still feeds
-        // the same partitions once recomputed. Leave `partition` untouched so a
-        // reduce reassigned in the same failure pass keeps the full index set
-        // (`complete_map_job` re-inserts idempotently). `create_map_job`
-        // overwrites the mapping entry with the new host immediately after.
+        // Need to check if the job had already completed
+        // if self.is_map_job_complete(partition, index);
+
+        if self.is_map_job_complete(index) {
+            self.progress.completed_map_jobs -= 1;
+        }
         self.mapping.remove(&index);
+        self.progress.total_map_jobs -= 1;
     }
 
     /// Records the partitions a finished map job produced on `host`.
     pub fn complete_map_job(&mut self, mr: MapResponse) {
+        self.progress.completed_map_jobs += 1;
         for partition in mr.seen_partitions {
             self.partition
                 .entry(partition)
@@ -44,22 +67,32 @@ impl JobLookup {
         }
     }
 
-    pub fn is_map_job_complete(&self, partition: &String, index: usize) -> bool {
-        self.partition
-            .get(partition)
-            .is_some_and(|indices| indices.contains(&index))
+    pub fn is_map_job_complete(&self, index: usize) -> bool {
+        let mut seen = false;
+        self.partition.iter().for_each(|(_, v)| {
+            if v.contains(&index) {
+                seen = true;
+            }
+        });
+
+        seen
     }
 
     pub fn create_reduce_job(&mut self, partition: String, host: Host) {
         self.reducing.insert(partition, host);
+        self.progress.total_reduce_jobs += 1;
     }
 
     pub fn signal_reduce_job_failure(&mut self, partition: &String) {
         self.reducing.remove(partition);
+        self.progress.total_reduce_jobs -= 1;
     }
 
     /// A stub for now.
-    pub fn complete_reduce_job(&mut self, _partition: String) {}
+    pub fn complete_reduce_job(&mut self, _partition: String) {
+        println!("Completed reduce job: {}", _partition);
+        self.progress.completed_reduce_jobs += 1;
+    }
 
     pub fn get_host_by_index(&self, index: usize) -> &Host {
         self.mapping.get(&index).unwrap()
@@ -96,8 +129,6 @@ impl JobLookup {
     }
 
     pub fn clear(&mut self) {
-        self.mapping.clear();
-        self.partition.clear();
-        self.reducing.clear();
+        *self = Self::default();
     }
 }
