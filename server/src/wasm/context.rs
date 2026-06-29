@@ -1,3 +1,4 @@
+use tracing::info;
 use wasmtime::component::HasData;
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxView, WasiView};
 
@@ -10,7 +11,7 @@ pub struct HostAPI {
 
 impl Host for HostAPI {
     fn log(&mut self, msg: String) {
-        println!("[Guest] {}", msg);
+        info!("[Guest] {}", msg);
     }
 }
 

@@ -1,0 +1,55 @@
+# OpenTelemetry Collector configuration.
+#
+# The cluster nodes export traces, metrics and logs here over OTLP/gRPC. The
+# collector then fans each signal out to its backend:
+#   traces  -> Tempo
+#   metrics -> exposed for Prometheus to scrape
+#   logs    -> Loki (native OTLP ingestion)
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  # Traces -> Tempo (OTLP/gRPC).
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Metrics -> Prometheus. The collector exposes a /metrics endpoint that
+  # Prometheus scrapes. `resource_to_telemetry_conversion` copies resource
+  # attributes (service.name, service.instance.id) onto each series so the
+  # individual cluster nodes are distinguishable.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Logs -> Loki (OTLP HTTP ingestion at /otlp).
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]

@@ -1,6 +1,6 @@
 use mapreduce::map::{MapRequest, handle_map};
 
-use crate::common::{read_intermediate, test_server};
+use crate::common::{context_without_tracing, read_intermediate, test_server};
 
 #[tokio::test]
 async fn deduplicates_partitions() {
@@ -8,6 +8,7 @@ async fn deduplicates_partitions() {
 
     let response = handle_map(
         server,
+        context_without_tracing(),
         MapRequest {
             index: 7,
             key_range: vec!["1".to_owned(), "2".to_owned()],
@@ -28,6 +29,7 @@ async fn generates_correct_response() {
 
     let response = handle_map(
         server,
+        context_without_tracing(),
         MapRequest {
             index: 42,
             key_range: vec!["1".to_owned()],
@@ -45,6 +47,7 @@ async fn writes_correct_data() {
 
     handle_map(
         server.clone(),
+        context_without_tracing(),
         MapRequest {
             index: 3,
             key_range: vec!["1".to_owned()],
@@ -83,6 +86,7 @@ async fn gracefully_exits_on_bad_wasm_binary() {
 
     let response = handle_map(
         server,
+        context_without_tracing(),
         MapRequest {
             index: 9,
             key_range: vec!["1".to_owned()],
@@ -100,6 +104,7 @@ async fn gracefully_exits_on_bad_wasm_call() {
 
     let response = handle_map(
         server,
+        context_without_tracing(),
         MapRequest {
             index: 10,
             key_range: vec!["not-a-number".to_owned()],

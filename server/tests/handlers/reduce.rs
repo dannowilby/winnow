@@ -5,7 +5,8 @@ use mapreduce::{
 };
 
 use crate::common::{
-    read_reduce_out, seed_map_output, test_served_node, test_server, write_intermediate,
+    context_without_tracing, read_reduce_out, seed_map_output, test_served_node, test_server,
+    write_intermediate,
 };
 
 /// The loopback host every [test_served_node] serves itself as.
@@ -38,6 +39,7 @@ async fn reduces_single_index() {
 
     handle_reduce(
         server.clone(),
+        context_without_tracing(),
         ReduceRequest {
             partition: "odd".to_owned(),
             indices: vec![0],
@@ -74,6 +76,7 @@ async fn combines_values_across_indices() {
 
     handle_reduce(
         server.clone(),
+        context_without_tracing(),
         ReduceRequest {
             partition: "even".to_owned(),
             indices: vec![0, 1],
@@ -116,6 +119,7 @@ async fn groups_distinct_keys_in_partition() {
 
     handle_reduce(
         server.clone(),
+        context_without_tracing(),
         ReduceRequest {
             partition: "p".to_owned(),
             indices: vec![0],
@@ -138,6 +142,7 @@ async fn gracefully_exits_on_bad_wasm_binary() {
 
     let response = handle_reduce(
         server,
+        context_without_tracing(),
         ReduceRequest {
             partition: "odd".to_owned(),
             indices: vec![],

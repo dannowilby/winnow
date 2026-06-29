@@ -11,7 +11,9 @@ use mapreduce::{
     reduce::{ReduceError, ReduceRequest, handle_reduce},
 };
 
-use crate::common::{TestNode, read_reduce_out, seed_map_output, spawn_cluster};
+use crate::common::{
+    TestNode, context_without_tracing, read_reduce_out, seed_map_output, spawn_cluster,
+};
 
 /// Records on the leader that `index` finished on `data_host` and produced
 /// `partition`, so a reducer's `IsMapJobComplete` and `IndexLocation` queries
@@ -72,6 +74,7 @@ async fn recovers_when_data_host_briefly_down() {
         Duration::from_secs(30),
         handle_reduce(
             nodes[2].server.clone(),
+            context_without_tracing(),
             reduce_request("odd", vec![0, 1], nodes[0].host.clone()),
         ),
     )
@@ -116,6 +119,7 @@ async fn requeues_on_query_failure() {
         Duration::from_secs(30),
         handle_reduce(
             nodes[2].server.clone(),
+            context_without_tracing(),
             reduce_request("odd", vec![0], nodes[0].host.clone()),
         ),
     )
@@ -163,6 +167,7 @@ async fn requeues_until_map_output_complete() {
         Duration::from_secs(30),
         handle_reduce(
             nodes[2].server.clone(),
+            context_without_tracing(),
             reduce_request("odd", vec![0], nodes[0].host.clone()),
         ),
     )
@@ -199,6 +204,7 @@ async fn requeues_when_download_fails() {
         Duration::from_secs(30),
         handle_reduce(
             nodes[2].server.clone(),
+            context_without_tracing(),
             reduce_request("odd", vec![0], nodes[0].host.clone()),
         ),
     )
@@ -250,6 +256,7 @@ async fn recovers_when_leader_briefly_down() {
         Duration::from_secs(30),
         handle_reduce(
             nodes[2].server.clone(),
+            context_without_tracing(),
             reduce_request("odd", vec![0], nodes[0].host.clone()),
         ),
     )
@@ -285,6 +292,7 @@ async fn fails_when_leader_unrecoverable() {
 
     let result = handle_reduce(
         nodes[2].server.clone(),
+        context_without_tracing(),
         reduce_request("odd", vec![0], nodes[0].host.clone()),
     )
     .await;

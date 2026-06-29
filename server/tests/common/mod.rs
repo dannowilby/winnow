@@ -4,11 +4,12 @@
 mod net;
 
 pub use net::InMemoryNet;
+use tarpc::context::{self, Context};
 
 use std::{
     io::Cursor,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use tokio::sync::RwLock;
@@ -258,4 +259,13 @@ pub fn read_reduce_out(
     }
 
     records
+}
+
+/// Returns a request context with a longer default timeout. Useful as
+/// map/reduce endpoints take a while loading WASM and computing output.
+pub fn context_without_tracing() -> Context {
+    let mut ctx = context::current();
+    ctx.deadline = Instant::now() + Duration::from_secs(60);
+
+    ctx
 }

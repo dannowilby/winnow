@@ -17,12 +17,12 @@ use tokio::{
 
 use mapreduce::{
     cluster::Host,
-    server::{MapReduceServer, MapReduceService, MapReduceServiceClient, context},
+    server::{MapReduceServer, MapReduceService, MapReduceServiceClient},
     transport::Connector,
     wasm::DefaultWasmEnv,
 };
 
-use crate::common::add_node;
+use crate::common::{add_node, context_without_tracing};
 
 /// A closure that mints a fresh client for a registered node. Each call sets up
 /// a new in-memory channel and hands the server half to the node's serve loop.
@@ -127,7 +127,10 @@ async fn in_memory_connector_round_trips_rpc() {
         .await
         .expect("connect to a registered node");
     assert!(
-        client.heartbeat(context()).await.expect("heartbeat rpc"),
+        client
+            .heartbeat(context_without_tracing())
+            .await
+            .expect("heartbeat rpc"),
         "a healthy node should answer its heartbeat",
     );
 
@@ -162,7 +165,10 @@ async fn multiple_connections() {
         .await
         .expect("connect to a registered node");
     assert!(
-        client.heartbeat(context()).await.expect("heartbeat rpc"),
+        client
+            .heartbeat(context_without_tracing())
+            .await
+            .expect("heartbeat rpc"),
         "a healthy node should answer its heartbeat",
     );
 
@@ -189,13 +195,18 @@ async fn kill_breaks_existing_client_connections() {
 
     // An already-connected client works...
     let client = net.connect(&hosts[0]).await.expect("connect");
-    assert!(client.heartbeat(context()).await.expect("heartbeat ok"));
+    assert!(
+        client
+            .heartbeat(context_without_tracing())
+            .await
+            .expect("heartbeat ok")
+    );
 
     // ...and after kill, that SAME client's RPCs error (transport closed),
     // which is what surfaces a MachineFailure in handle_promote.
     net.kill(&hosts[0]).await;
     assert!(
-        client.heartbeat(context()).await.is_err(),
+        client.heartbeat(context_without_tracing()).await.is_err(),
         "existing client should error once its node is killed",
     );
 }

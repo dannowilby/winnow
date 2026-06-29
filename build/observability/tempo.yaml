@@ -1,0 +1,25 @@
+# Minimal single-binary Tempo for local development. Receives traces from the
+# OpenTelemetry Collector over OTLP/gRPC and stores them on local disk.
+#
+# Note: Tempo 3.0 removed the root `ingester:`/`compactor:` config blocks, so we
+# rely on defaults here (fine for a local dev stack).
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks

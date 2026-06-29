@@ -1,8 +1,13 @@
 use serde::{Deserialize, Serialize};
+use tarpc::context;
 use thiserror::Error;
+use tracing::info_span;
 
 use crate::{
-    cluster::Host, job_lookup::Progress, server::MapReduceServer, storage::StorageError,
+    cluster::Host,
+    job_lookup::Progress,
+    server::{MapReduceServer, set_parent},
+    storage::StorageError,
     wasm::WasmEnv,
 };
 
@@ -41,8 +46,11 @@ pub enum QueryError {
 
 pub async fn handle_query<W: WasmEnv>(
     server: MapReduceServer<W>,
+    ctx: context::Context,
     q: QueryRequest,
 ) -> Result<QueryResponse, QueryError> {
+    let span = info_span!("Query");
+    set_parent(&span, &ctx);
     match q {
         QueryRequest::IsMapJobComplete(index) => Ok(QueryResponse::Status(
             server.job_lookup.read().await.is_map_job_complete(index),

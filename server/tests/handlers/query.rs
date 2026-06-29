@@ -4,7 +4,7 @@ use mapreduce::{
     storage::{IntermediateData, OutputData},
 };
 
-use crate::common::test_server;
+use crate::common::{context_without_tracing, test_server};
 
 #[tokio::test]
 async fn returns_correct_map_output() {
@@ -25,6 +25,7 @@ async fn returns_correct_map_output() {
 
     let response = handle_query(
         server,
+        context_without_tracing(),
         QueryRequest::DownloadMapOutput(4, "even".to_owned()),
     )
     .await
@@ -53,9 +54,13 @@ async fn returns_correct_reduce_output() {
         .get_reduce_out("odd".to_owned())
         .expect("read reduce output");
 
-    let response = handle_query(server, QueryRequest::DownloadReduceOutput("odd".to_owned()))
-        .await
-        .expect("query succeeds");
+    let response = handle_query(
+        server,
+        context_without_tracing(),
+        QueryRequest::DownloadReduceOutput("odd".to_owned()),
+    )
+    .await
+    .expect("query succeeds");
 
     let QueryResponse::Data(data) = response else {
         panic!("expected data response");
@@ -77,9 +82,13 @@ async fn returns_correct_index() {
         .await
         .create_map_job(8, expected.clone());
 
-    let response = handle_query(server, QueryRequest::IndexLocation(8))
-        .await
-        .expect("query succeeds");
+    let response = handle_query(
+        server,
+        context_without_tracing(),
+        QueryRequest::IndexLocation(8),
+    )
+    .await
+    .expect("query succeeds");
 
     let QueryResponse::Host(host) = response else {
         panic!("expected host response");
@@ -93,6 +102,7 @@ async fn gracefully_fails_on_invalid_map_output_query() {
 
     let response = handle_query(
         server,
+        context_without_tracing(),
         QueryRequest::DownloadMapOutput(404, "missing".to_owned()),
     )
     .await;
@@ -106,6 +116,7 @@ async fn gracefully_fails_on_invalid_reduce_output_query() {
 
     let response = handle_query(
         server,
+        context_without_tracing(),
         QueryRequest::DownloadReduceOutput("missing".to_owned()),
     )
     .await;
@@ -117,7 +128,12 @@ async fn gracefully_fails_on_invalid_reduce_output_query() {
 async fn gracefully_fails_on_invalid_index_query() {
     let server = test_server("query-missing-index").await;
 
-    let response = handle_query(server, QueryRequest::IndexLocation(404)).await;
+    let response = handle_query(
+        server,
+        context_without_tracing(),
+        QueryRequest::IndexLocation(404),
+    )
+    .await;
 
     assert!(response.is_err());
 }

@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use tarpc::context;
 use thiserror::Error;
+use tracing::info_span;
 
 use crate::{
-    server::MapReduceServer,
+    server::{MapReduceServer, set_parent},
     storage::{IntermediateData, StorageError},
     wasm::{
         WasmEnv,
@@ -40,8 +42,13 @@ pub enum MapError {
 
 pub async fn handle_map<W: WasmEnv>(
     server: MapReduceServer<W>,
+    ctx: context::Context,
     mp: MapRequest,
 ) -> Result<MapResponse, MapError> {
+    let span = info_span!("Map");
+    set_parent(&span, &ctx);
+    tracing::info!(trace = %ctx.trace_id(), "received map");
+
     // We have to create the environment in the thread that builds and
     // executes the wasm code. wasmtime constructs do not mostly implement `Send`
     let programs = server.programs.read().await;

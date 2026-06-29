@@ -1,5 +1,6 @@
 pub mod cluster;
 pub mod server;
+pub mod telemetry;
 pub mod transport;
 pub mod wasm;
 

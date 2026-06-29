@@ -2,11 +2,13 @@ use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use tarpc::context;
 use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
+use tracing::{Instrument, Span, error, info, info_span, warn_span};
 
 use crate::cluster::ActiveConnection;
-use crate::server::{MapReduceServer, context};
+use crate::server::{MapReduceServer, context, set_parent};
 use crate::{
     cluster::Host,
     map::{MapRequest, MapResponse},
@@ -45,17 +47,21 @@ pub enum PromoteError {}
 /// Coordinates all the machines and drive map-reduce to completion.
 pub async fn handle_promote<W: WasmEnv>(
     server: MapReduceServer<W>,
+    ctx: context::Context,
     pr: PromoteRequest,
 ) -> HashMap<String, Host> {
+    let span = info_span!("Promote");
+    set_parent(&span, &ctx);
+
     // verify that all connections are up to date
     server.cluster.write().await.reconnect().await;
 
     // prime every member: this clears their data folder + global state and
     // distributes the programs the map and reduce endpoints will use.
-    prime_cluster(&server, &pr).await;
+    prime_cluster(&server, &span, &pr).await;
 
     let mut events = JoinSet::new();
-    spawn_initial_heartbeats(&mut events, &server).await;
+    spawn_initial_heartbeats(&mut events, &span, &server).await;
 
     let mut completed_reduce_jobs: usize = 0;
     let mut total_reduce_jobs: usize = 0;
@@ -63,14 +69,14 @@ pub async fn handle_promote<W: WasmEnv>(
     let mut sent_initial_reduce_jobs = false;
 
     let mut completed_map_jobs: usize = 0;
-    println!("Spawning map jobs");
-    let total_map_jobs: usize = spawn_initial_map_jobs(&mut events, &server, &pr).await;
+    info!("Spawning map jobs");
+    let total_map_jobs: usize = spawn_initial_map_jobs(&mut events, &span, &server, &pr).await;
 
     while let Some(Ok(event)) = events.join_next().await {
         match event {
             LeaderEvent::MachineFailure(host) => {
                 let (map_job_delta, reduce_job_delta) =
-                    handle_machine_failure(&mut events, &server, &pr, host).await;
+                    handle_machine_failure(&mut events, &span, &server, &pr, host).await;
 
                 completed_map_jobs = completed_map_jobs.saturating_sub(map_job_delta);
                 completed_reduce_jobs = completed_reduce_jobs.saturating_sub(reduce_job_delta);
@@ -82,7 +88,7 @@ pub async fn handle_promote<W: WasmEnv>(
 
                 completed_map_jobs += 1;
 
-                println!(
+                info!(
                     "Map job finished: {}/{}",
                     completed_map_jobs, total_map_jobs
                 );
@@ -93,16 +99,17 @@ pub async fn handle_promote<W: WasmEnv>(
 
                 // spawn initial reduce jobs
                 sent_initial_reduce_jobs = true;
-                total_reduce_jobs = spawn_initial_reduce_jobs(&mut events, &server, &pr).await;
+                total_reduce_jobs =
+                    spawn_initial_reduce_jobs(&mut events, &span, &server, &pr).await;
             }
             LeaderEvent::ReduceComplete(partition, host) => {
-                println!("[INFO]: Reduce job completed on {:?}", host);
+                info!("Reduce job completed on {:?}", host);
                 let mut job_lookup = server.job_lookup.write().await;
                 job_lookup.complete_reduce_job(partition);
 
                 completed_reduce_jobs += 1;
 
-                println!(
+                info!(
                     "Completed reduce job: {}/{}",
                     completed_reduce_jobs, total_reduce_jobs
                 );
@@ -114,18 +121,20 @@ pub async fn handle_promote<W: WasmEnv>(
             }
             LeaderEvent::Heartbeat(connection) => {
                 // requeue the heartbeat
-                events.spawn(heartbeat(connection));
+                events.spawn(
+                    heartbeat(connection).instrument(info_span!(parent: &span, "heartbeat")),
+                );
             }
         }
     }
 
-    println!("Finished job");
+    info!("Finished job");
     server.job_lookup.read().await.reducing.clone()
 }
 
 /// Sends a [PrimeRequest] to every live member so each machine wipes its data
 /// folder + global state and stores the programs used by map and reduce.
-async fn prime_cluster<W: WasmEnv>(server: &MapReduceServer<W>, pr: &PromoteRequest) {
+async fn prime_cluster<W: WasmEnv>(server: &MapReduceServer<W>, span: &Span, pr: &PromoteRequest) {
     let prime_request = PrimeRequest {
         read_src: pr.read_src.clone(),
         map_src: pr.map_src.clone(),
@@ -153,14 +162,15 @@ async fn prime_cluster<W: WasmEnv>(server: &MapReduceServer<W>, pr: &PromoteRequ
                 .await;
 
             if result.is_err() {
-                println!(
-                    "[prime][WARNING]: could not prime host ({:?}), see below for details",
+                error!(
+                    "could not prime host ({:?}), see below for details",
                     connection.host
                 );
-                println!("[prime][WARNING]: {}", result.err().unwrap());
+                error!("{}", result.err().unwrap());
                 server.cluster.write().await.signal_fail(connection.host);
             }
         }
+        .instrument(info_span!(parent: span, "prime"))
     });
 
     join_all(prime_futures).await;
@@ -169,6 +179,7 @@ async fn prime_cluster<W: WasmEnv>(server: &MapReduceServer<W>, pr: &PromoteRequ
 
 async fn spawn_initial_heartbeats<W: WasmEnv>(
     events: &mut JoinSet<LeaderEvent>,
+    span: &Span,
     server: &MapReduceServer<W>,
 ) {
     // Start heartbeating the live cluster members
@@ -177,15 +188,18 @@ async fn spawn_initial_heartbeats<W: WasmEnv>(
             continue;
         }
 
-        events.spawn(heartbeat(member.clone()));
+        events.spawn(heartbeat(member.clone()).instrument(info_span!(parent: span, "heartbeat")));
     }
 }
 
 async fn spawn_initial_map_jobs<W: WasmEnv>(
     events: &mut JoinSet<LeaderEvent>,
+    span: &Span,
     server: &MapReduceServer<W>,
     pr: &PromoteRequest,
 ) -> usize {
+    info!("Spawning map jobs");
+
     // Store index + host and create request futures
     for (index, keys) in split_input_iter(pr.m, &pr.keys) {
         let mut cluster = server.cluster.write().await;
@@ -197,7 +211,8 @@ async fn spawn_initial_map_jobs<W: WasmEnv>(
             .await
             .create_map_job(index, connection.host.clone());
 
-        let request_future = send_map_request(connection.clone(), pr.clone(), index, keys.into());
+        let request_future = send_map_request(connection.clone(), pr.clone(), index, keys.into())
+            .instrument(info_span!(parent: span, "map_request", index));
         events.spawn(request_future);
     }
 
@@ -206,10 +221,11 @@ async fn spawn_initial_map_jobs<W: WasmEnv>(
 
 async fn spawn_initial_reduce_jobs<W: WasmEnv>(
     events: &mut JoinSet<LeaderEvent>,
+    span: &Span,
     server: &MapReduceServer<W>,
     pr: &PromoteRequest,
 ) -> usize {
-    println!("Spawning reduce jobs");
+    info!("Spawning reduce jobs");
 
     let job_lookup = server.job_lookup.write().await;
     let partitions = job_lookup.partition.clone();
@@ -230,9 +246,10 @@ async fn spawn_initial_reduce_jobs<W: WasmEnv>(
         let request_future = send_reduce_request(
             connection.clone(),
             leader,
-            partition,
+            partition.clone(),
             indices.iter().cloned().collect(),
-        );
+        )
+        .instrument(info_span!(parent: span, "reduce_request", partition = %partition));
         events.spawn(request_future);
     }
 
@@ -244,14 +261,17 @@ async fn spawn_initial_reduce_jobs<W: WasmEnv>(
 /// ie. (map job failures, reduce job failures)
 async fn handle_machine_failure<W: WasmEnv>(
     events: &mut JoinSet<LeaderEvent>,
+    p_span: &Span,
     server: &MapReduceServer<W>,
     pr: &PromoteRequest,
     host: Host,
 ) -> (usize, usize) {
+    let span = warn_span!(parent: p_span, "Machine failure");
+
     let mut cluster = server.cluster.write().await;
     let mut job_lookup = server.job_lookup.write().await;
 
-    println!("[WARNING]: Host at {:?} failed", host.clone());
+    error!("Host at {:?} failed", host.clone());
 
     cluster.signal_fail(host.clone());
 
@@ -271,7 +291,8 @@ async fn handle_machine_failure<W: WasmEnv>(
         job_lookup.signal_map_job_failure(*index);
         job_lookup.create_map_job(*index, connection.host.clone());
 
-        let request_future = send_map_request(connection.clone(), pr.clone(), *index, keys.into());
+        let request_future = send_map_request(connection.clone(), pr.clone(), *index, keys.into())
+            .instrument(info_span!(parent: &span, "map_request", index = *index));
         events.spawn(request_future);
     }
 
@@ -301,7 +322,8 @@ async fn handle_machine_failure<W: WasmEnv>(
             cluster.get_loopback().host.clone(),
             partition.clone(),
             indices.iter().cloned().collect(),
-        );
+        )
+        .instrument(info_span!(parent: &span, "reduce_request", partition = %partition));
         events.spawn(request_future);
     }
 
@@ -356,7 +378,7 @@ async fn send_map_request(
     match result {
         Ok(response) => {
             if response.is_err() {
-                println!("[map][WARNING]: {}", response.err().unwrap());
+                error!("{}", response.err().unwrap());
                 return LeaderEvent::MachineFailure(connection.host.clone());
             }
 
@@ -394,7 +416,7 @@ async fn send_reduce_request(
     match result {
         Ok(response) => {
             if response.is_err() {
-                println!("[reduce][WARNING]: {}", response.err().unwrap());
+                error!("{}", response.err().unwrap());
                 return LeaderEvent::MachineFailure(connection.host.clone());
             }
 

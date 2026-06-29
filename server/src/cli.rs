@@ -18,6 +18,7 @@ use mapreduce::{
 use serde::Deserialize;
 use tarpc::{client::RpcError, tokio_util::sync::CancellationToken};
 use thiserror::Error;
+use tracing::{Instrument, info_span};
 
 #[derive(Error, Debug)]
 pub enum CliError {
@@ -66,22 +67,29 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<(), CliError> {
+    let telemetry = mapreduce::telemetry::init("winnow-cli")
+        .map_err(|e| CliError::Other(format!("failed to initialize telemetry: {e}")))?;
+
     let cli = Cli::parse();
     let config: JobConfig = serde_json::from_slice(&fs::read("./job.json")?)?;
 
     println!();
     println!("Winnow CLI");
 
-    match cli.command {
-        Command::RunJob => start_job(&config).await?,
-        Command::Download { partition } => download(&config, &partition).await?,
-    }
+    let result = match cli.command {
+        Command::RunJob => start_job(&config).await,
+        Command::Download { partition } => download(&config, &partition).await,
+    };
 
-    Ok(())
+    telemetry.shutdown();
+
+    result
 }
 
 /// Download and print the output for a single partition.
 async fn download(config: &JobConfig, partition: &str) -> Result<(), CliError> {
+    let span = info_span!("CLI Download", job_name = &config.id);
+
     println!("Downloading partition: {}", partition);
     // TODO: wire up — query the host holding `partition`, download its reduce
     // output, then hand the bytes to `deserialize_and_print_output`.
@@ -111,6 +119,7 @@ async fn download(config: &JobConfig, partition: &str) -> Result<(), CliError> {
             context(),
             QueryRequest::DownloadReduceOutput(partition.to_owned()),
         )
+        .instrument(span)
         .await?
         .map_err(CliError::Other)?
     else {
@@ -134,6 +143,10 @@ fn deserialize_and_print_output(r: Vec<u8>) {
 }
 
 async fn start_job(config: &JobConfig) -> Result<(), CliError> {
+    // tracing::info!(job.id = %config.id, "submitting job to cluster");
+
+    let span = info_span!("Run job", job_name = &config.id);
+
     let cluster = ClusterList::new(
         vec![(config.leader.domain.clone(), config.leader.port)],
         0,
@@ -162,8 +175,6 @@ async fn start_job(config: &JobConfig) -> Result<(), CliError> {
         keys,
     };
 
-    let ctx = context();
-
     let n = Instant::now();
 
     let token = CancellationToken::new();
@@ -171,11 +182,17 @@ async fn start_job(config: &JobConfig) -> Result<(), CliError> {
     let request_handle = tokio::spawn({
         let token = token.clone();
         let t = cluster.get_loopback().client.clone();
+        let span = span.clone();
         async move {
-            let request = t.as_ref().unwrap().promote(ctx, promote_request).await;
+            let request = t
+                .as_ref()
+                .unwrap()
+                .promote(context(), promote_request)
+                .await;
             token.cancel();
             request
         }
+        .instrument(span)
     });
 
     // The overall display: a "primed" status line at the top, followed by a
@@ -210,6 +227,7 @@ async fn start_job(config: &JobConfig) -> Result<(), CliError> {
     let progress_handle = tokio::spawn({
         let token = token.clone();
         let t = cluster.get_loopback().client.clone();
+        let span = span.clone();
 
         // Pulls the latest progress from the server and reflects it onto the
         // status line and the two progress bars. The bars are cheap (Arc-backed)
@@ -270,6 +288,7 @@ async fn start_job(config: &JobConfig) -> Result<(), CliError> {
                 }
             }
         }
+        .instrument(span)
     });
 
     let (response, _progress_err) = tokio::join!(request_handle, progress_handle);

@@ -17,6 +17,7 @@ use std::{
 };
 use tarpc::server::{self, Channel, incoming::Incoming};
 use tokio::sync::RwLock;
+use tracing::info;
 
 /// Mirrors the structure of `cluster.json`.
 #[derive(Debug, Deserialize)]
@@ -53,7 +54,7 @@ fn load_cluster() -> Result<(ClusterList, (IpAddr, u16))> {
     let me = &config.members[loopback];
     let server_addr = (IpAddr::V6(Ipv6Addr::LOCALHOST), me.port);
 
-    println!(
+    info!(
         "starting node {loopback} ({}:{}) of {} cluster member(s)",
         me.domain,
         me.port,
@@ -68,6 +69,8 @@ fn load_cluster() -> Result<(ClusterList, (IpAddr, u16))> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let telemetry = mapreduce::telemetry::init("mapreduce-server")?;
+
     let (cluster_list, server_addr) = load_cluster()?;
 
     let mut listener = tarpc::serde_transport::tcp::listen(
@@ -103,6 +106,8 @@ async fn main() -> Result<()> {
         .await;
 
     storage.clear()?;
+
+    telemetry.shutdown();
 
     Ok(())
 }

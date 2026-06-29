@@ -7,7 +7,9 @@ use tokio::time::{sleep, timeout};
 
 use mapreduce::promote::{PromoteRequest, handle_promote};
 
-use crate::common::{TestNode, read_reduce_out, spawn_cluster, test_programs};
+use crate::common::{
+    TestNode, context_without_tracing, read_reduce_out, spawn_cluster, test_programs,
+};
 
 const ODD_SUM: i32 = 400; // 1 + 3 + ... + 39
 const EVEN_SUM: i32 = 420; // 2 + 4 + ... + 40
@@ -61,7 +63,12 @@ fn assert_correct_totals(nodes: &[TestNode]) {
 async fn promote_completes_with_no_failures() {
     let (_net, nodes) = spawn_cluster("promote-baseline", 3).await;
 
-    let reducing = handle_promote(nodes[0].server.clone(), promote_request()).await;
+    let reducing = handle_promote(
+        nodes[0].server.clone(),
+        context_without_tracing(),
+        promote_request(),
+    )
+    .await;
 
     // Both partitions were reduced...
     assert_eq!(reducing.len(), 2);
@@ -82,7 +89,11 @@ async fn completes_when_worker_dead_from_start() {
 
     let reducing = timeout(
         Duration::from_secs(120),
-        handle_promote(nodes[0].server.clone(), promote_request()),
+        handle_promote(
+            nodes[0].server.clone(),
+            context_without_tracing(),
+            promote_request(),
+        ),
     )
     .await
     .expect("promote should finish");
@@ -99,10 +110,13 @@ async fn survives_worker_death_mid_run() {
     let request = promote_request();
 
     let reducing = timeout(Duration::from_secs(120), async {
-        let (reducing, _) = tokio::join!(handle_promote(leader, request), async {
-            sleep(Duration::from_millis(100)).await;
-            nodes[2].kill().await;
-        });
+        let (reducing, _) = tokio::join!(
+            handle_promote(leader, context_without_tracing(), request),
+            async {
+                sleep(Duration::from_millis(100)).await;
+                nodes[2].kill().await;
+            }
+        );
         reducing
     })
     .await
@@ -123,10 +137,13 @@ async fn recomputes_lost_map_output_for_reduce() {
     let request = promote_request();
 
     let _reducing = timeout(Duration::from_secs(120), async {
-        let (reducing, _) = tokio::join!(handle_promote(leader, request), async {
-            sleep(Duration::from_millis(100)).await;
-            nodes[2].kill().await;
-        });
+        let (reducing, _) = tokio::join!(
+            handle_promote(leader, context_without_tracing(), request),
+            async {
+                sleep(Duration::from_millis(100)).await;
+                nodes[2].kill().await;
+            }
+        );
         reducing
     })
     .await;
@@ -146,7 +163,11 @@ async fn leader_survives_when_all_workers_die() {
 
     let reducing = timeout(
         Duration::from_secs(120),
-        handle_promote(nodes[0].server.clone(), promote_request()),
+        handle_promote(
+            nodes[0].server.clone(),
+            context_without_tracing(),
+            promote_request(),
+        ),
     )
     .await
     .expect("promote should finish on the sole survivor");

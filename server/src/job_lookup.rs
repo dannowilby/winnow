@@ -90,7 +90,6 @@ impl JobLookup {
 
     /// A stub for now.
     pub fn complete_reduce_job(&mut self, _partition: String) {
-        println!("Completed reduce job: {}", _partition);
         self.progress.completed_reduce_jobs += 1;
     }
 

@@ -1,7 +1,13 @@
 use serde::{Deserialize, Serialize};
+use tarpc::context;
 use thiserror::Error;
+use tracing::info_span;
 
-use crate::{server::MapReduceServer, storage::StorageError, wasm::WasmEnv};
+use crate::{
+    server::{MapReduceServer, set_parent},
+    storage::StorageError,
+    wasm::WasmEnv,
+};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PrimeRequest {
@@ -33,8 +39,12 @@ pub enum PrimeError {
 /// map and reduce endpoints can use them.
 pub async fn handle_prime<W: WasmEnv>(
     server: MapReduceServer<W>,
+    ctx: context::Context,
     pr: PrimeRequest,
 ) -> Result<(), PrimeError> {
+    let span = info_span!("Prime");
+    set_parent(&span, &ctx);
+
     server.storage.reset()?;
 
     // clear the global job-lookup state

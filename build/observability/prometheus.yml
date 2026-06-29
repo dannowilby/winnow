@@ -1,0 +1,17 @@
+# Prometheus scrapes the OpenTelemetry Collector, which republishes the metrics
+# pushed by every cluster node. Per-node metrics are distinguishable via the
+# `service_name` / `service_instance_id` labels (see the collector's
+# resource_to_telemetry_conversion setting).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

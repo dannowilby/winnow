@@ -1,14 +1,16 @@
 use std::{collections::VecDeque, time::Duration};
 
+use tarpc::context;
 use thiserror::Error;
 use tokio::time::sleep;
 
 use serde::{Deserialize, Serialize};
+use tracing::{Instrument, debug, info, info_span, warn};
 
 use crate::{
     cluster::Host,
     query::{QueryRequest, QueryResponse},
-    server::{MapReduceServer, context},
+    server::{MapReduceServer, context, set_parent},
     storage::{OutputData, StorageError},
     wasm::{WasmEnv, handle::reduce::ReduceFn},
 };
@@ -37,9 +39,13 @@ pub enum ReduceError {
 
 pub async fn handle_reduce<W: WasmEnv>(
     server: MapReduceServer<W>,
+    ctx: context::Context,
     rr: ReduceRequest,
 ) -> Result<(), ReduceError> {
-    println!("Running reduce job for {}", rr.partition);
+    let span = info_span!("Reduce");
+    set_parent(&span, &ctx);
+
+    info!("Running reduce job for {}", rr.partition);
 
     server.storage.clear_reduce_in(&rr.partition)?;
     server.storage.clear_reduce_out(&rr.partition)?;
@@ -94,10 +100,11 @@ pub async fn handle_reduce<W: WasmEnv>(
             .as_ref()
             .unwrap()
             .query(context(), QueryRequest::IsMapJobComplete(index))
+            .instrument(span.clone())
             .await
             .unwrap()
         else {
-            println!("[WARNING] {} has not completed yet", index);
+            warn!("{} has not completed yet", index);
             download_queue.push_back(index);
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
@@ -109,10 +116,11 @@ pub async fn handle_reduce<W: WasmEnv>(
             .as_ref()
             .unwrap()
             .query(context(), QueryRequest::IndexLocation(index))
+            .instrument(span.clone())
             .await
             .unwrap()
         else {
-            println!("[WARNING] Downloading {} failed to query host", index);
+            warn!("Downloading {} failed to query host", index);
             download_queue.push_back(index);
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
@@ -144,11 +152,12 @@ pub async fn handle_reduce<W: WasmEnv>(
                 context(),
                 QueryRequest::DownloadMapOutput(index, rr.partition.clone()),
             )
+            .instrument(span.clone())
             .await;
 
         let Ok(Ok(QueryResponse::Data(data))) = result else {
-            println!(
-                "[WARNING]: Downloading {} from {:?} failed to download data",
+            warn!(
+                "Downloading {} from {:?} failed to download data",
                 index, target_connection.host
             );
             download_queue.push_back(index);
@@ -156,8 +165,8 @@ pub async fn handle_reduce<W: WasmEnv>(
             continue;
         };
 
-        println!(
-            "[INFO]: {}-{}, {:?} downloaded data from {:?}",
+        info!(
+            "{}-{}, {:?} downloaded data from {:?}",
             rr.partition, index, leader.host, target_connection.host
         );
 

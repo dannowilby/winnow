@@ -3,7 +3,7 @@ use mapreduce::{
     storage::{IntermediateData, OutputData},
 };
 
-use crate::common::test_server;
+use crate::common::{context_without_tracing, test_server};
 
 fn prime_request() -> PrimeRequest {
     PrimeRequest {
@@ -40,7 +40,7 @@ async fn prime_resets_storage() {
         )
         .expect("write reduce output");
 
-    handle_prime(server.clone(), prime_request())
+    handle_prime(server.clone(), context_without_tracing(), prime_request())
         .await
         .expect("prime succeeds");
 
@@ -53,7 +53,7 @@ async fn prime_sets_programs() {
     let server = test_server("prime-sets-programs").await;
     let request = prime_request();
 
-    handle_prime(server.clone(), request.clone())
+    handle_prime(server.clone(), context_without_tracing(), request.clone())
         .await
         .expect("prime succeeds");
 

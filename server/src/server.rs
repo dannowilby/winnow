@@ -16,8 +16,12 @@ use crate::{
     storage::Storage,
     wasm::WasmEnv,
 };
+use opentelemetry::TraceFlags;
+use opentelemetry::trace::{SpanContext, TraceContextExt, TraceState};
 use tarpc::context::{self, Context};
 use tokio::sync::RwLock;
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[tarpc::service]
 pub trait MapReduceService {
@@ -73,30 +77,30 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
         true
     }
 
-    async fn prime(self, _: context::Context, pr: PrimeRequest) -> Result<(), String> {
-        handle_prime(self, pr)
+    async fn prime(self, ctx: context::Context, pr: PrimeRequest) -> Result<(), String> {
+        handle_prime(self, ctx, pr)
             .await
             .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
-    async fn map(self, _: context::Context, mp: MapRequest) -> Result<MapResponse, String> {
-        handle_map(self, mp)
+    async fn map(self, ctx: context::Context, mp: MapRequest) -> Result<MapResponse, String> {
+        handle_map(self, ctx, mp)
             .await
             .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
-    async fn reduce(self, _: context::Context, rr: ReduceRequest) -> Result<(), String> {
-        handle_reduce(self, rr)
+    async fn reduce(self, ctx: context::Context, rr: ReduceRequest) -> Result<(), String> {
+        handle_reduce(self, ctx, rr)
             .await
             .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
-    async fn promote(self, _: context::Context, pr: PromoteRequest) -> HashMap<String, Host> {
-        handle_promote(self, pr).await
+    async fn promote(self, ctx: context::Context, pr: PromoteRequest) -> HashMap<String, Host> {
+        handle_promote(self, ctx, pr).await
     }
 
-    async fn query(self, _: context::Context, q: QueryRequest) -> Result<QueryResponse, String> {
-        handle_query(self, q)
+    async fn query(self, ctx: context::Context, q: QueryRequest) -> Result<QueryResponse, String> {
+        handle_query(self, ctx, q)
             .await
             .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
@@ -109,4 +113,19 @@ pub fn context() -> Context {
     ctx.deadline = Instant::now() + Duration::from_secs(60);
 
     ctx
+}
+
+pub fn set_parent(span: &Span, ctx: &context::Context) {
+    if !ctx.trace_id().is_none() {
+        let trace = &ctx.trace_context;
+        let parent_ctx = opentelemetry::Context::new().with_remote_span_context(SpanContext::new(
+            trace.trace_id.into(),
+            trace.span_id.into(),
+            TraceFlags::from(trace.sampling_decision),
+            true,
+            TraceState::default(),
+        ));
+
+        span.set_parent(parent_ctx);
+    }
 }
