@@ -49,7 +49,7 @@ This will run three of winnow's MapReduce nodes along with an instance for Grafa
 cp example.job.json job.json
 cp example.keys.txt keys.txt
 ```
-To learn more about defining jobs, read [here](https://google.com)
+~~To learn more about defining jobs, read [here]()~~ Under construction!
 
 4. Use the CLI to run the job
 ```
@@ -62,6 +62,21 @@ Once the job finishes, a json file with the job's name will be written containin
 just cli download <partition name>
 ```
 
+## Features
+
+**Fault-tolerance**
+
+A heartbeat mechanism is used to detect failures. When a leader detects a machine has failed, the map job for the index split is rescheduled on a random, live machine. The reduce jobs are similarly rescheduled, using an exponential backoff to wait until the new map job has finished producing data.
+
+**Observability**
+
+OpenTelemetry metrics, traces, and logs are configured. A trace can be followed through from the start of a job with the CLI, to each individual data query in the reduce stage.
+
+**Async support**
+
+Each component of the MapReduce job allows asynchronous execution, not stalling the a job if one input key takes longer than expected.
+
 ## Limitations
+
 WASM is often cited as a strong use case for secure environments. The WASM components are run in a non-secure setting here: they can make network requests, allocate memory, and write to the file system. This assumes that you trust the jobs you are running, and only come from within your own organization.
 
