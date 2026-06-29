@@ -18,7 +18,7 @@
 ---
 
 This was built as a successor to [Hadoop Streaming](https://hadoop.apache.org/docs/r1.2.1/streaming.html). Hadoop Streaming is an implementation of MapReduce with where the user programs are executables called on the task-running machine, and the data is passed in through standard input. This can work well, but consider the following scenario:
-> You have a 30-line Python map function: the 500 nodes that each need version-matched Python plus every imported library, the tab-delimited stdin/stdout breaks the first time a value contains a tab or a non-UTF-8 byte, and the per-task subprocess forks
+> You have a 30-line Python map function: 500 nodes each need version-matched Python plus every imported library, the tab-delimited stdin/stdout breaks the first time a value contains a tab or a non-UTF-8 byte, and the per-task subprocess forks
 
 Winnow solves all three issues by using WASM components to define the MapReduce job. Write your program once with a typed interface and run on all your machines with no extra environment configurations.
 
