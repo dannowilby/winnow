@@ -1,9 +1,10 @@
 # Winnow
-> "to separate grain from chaff"
 
 A Rust implementation of Google's MapReduce with WASM-powered user programs.
 
 ![codecov](https://codecov.io/github/dannowilby/winnow/graph/badge.svg) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](#license)
+
+<img width="454" height="98" alt="winnow-cli" src="https://github.com/user-attachments/assets/63a8be23-eff3-4cbe-8554-b6a2c38941bb" />
 
 ## Quick start
 
