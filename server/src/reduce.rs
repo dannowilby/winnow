@@ -5,7 +5,7 @@ use thiserror::Error;
 use tokio::time::sleep;
 
 use serde::{Deserialize, Serialize};
-use tracing::{Instrument, debug, info, info_span, warn};
+use tracing::{Instrument, info, info_span, warn};
 
 use crate::{
     cluster::Host,
