@@ -1,28 +1,82 @@
-# Winnow
 
-A Rust implementation of Google's MapReduce with WASM-powered user programs.
+<div align="center">
+   <img width="454" height="98" alt="winnow-cli" src="https://github.com/user-attachments/assets/63a8be23-eff3-4cbe-8554-b6a2c38941bb" />
+   <div id="user-content-toc">
+      <ul align="center" style="list-style: none;">
+       <summary>
+         <h1>Winnow</h1>
+       </summary>
+      </ul>
+   </div>
+   <p align="center">MapReduce jobs as WASM components</p>
+   <div align="center">
+   <img src="https://codecov.io/github/dannowilby/winnow/graph/badge.svg" />
+   <img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" />
+   </div>
+</div>
 
-![codecov](https://codecov.io/github/dannowilby/winnow/graph/badge.svg) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](#license)
+---
 
-<img width="454" height="98" alt="winnow-cli" src="https://github.com/user-attachments/assets/63a8be23-eff3-4cbe-8554-b6a2c38941bb" />
+This was built as a successor to [Hadoop Streaming](https://hadoop.apache.org/docs/r1.2.1/streaming.html). Hadoop Streaming is an implementation of MapReduce with where the user programs are executables called on the task-running machine, and the data is passed in through standard input. This can work well, but consider the following scenario:
+> You have a 30-line Python map function: 500 nodes each need version-matched Python plus every imported library, the tab-delimited stdin/stdout breaks the first time a value contains a tab or a non-UTF-8 byte, and the per-task subprocess forks
+
+Winnow solves all three issues by using WASM components to define the MapReduce job. Write your program once with a typed interface and run on all your machines with no extra environment configurations.
+
+| | Hadoop Streaming | This engine |
+| --- | --- | --- |
+| Deploying a job| interpreter/binary installed + version-matched per node | one .wasm, compiled once, runs anywhere |
+| How data crosses | tab-delimited text over stdin/stdout | typed values across a declared interface |
+| Per task | fork a subprocess | in-process call |
+| Cross-arch/OS| native code rebuilt per target | portable artifact, no rebuild |
 
 ## Quick start
 
-## Getting started
-1. Build or download the server binary and deploy it on your cluster's members,
-   passing the port to serve on as a flag `--port 3000` or specified in the
-   config file. It is optional to provide all the cluster members at this point.
+1. Clone this repo
+```bash
+git clone https://github.com/dannowilby/winnow.git
+cd winnow
+```
 
-2. Build your map reduce components. The components folder is already set up
-   with all the necessary dependencies to compile, and running `just
-   build-components` will spit out the built binaries for you.
+2. Start a local cluster
+```bash
+just run-local-cluster
+```
+This will run three of winnow's MapReduce nodes along with an instance for Grafana, Loki, Tempo, and Prometheus. 
+> In addition to starting the instances, the command will also build release versions of the example user program contained in `components/`. If you want to rebuild them at any point, recompile them with `just build-components`.
 
-3. Either pass the cluster members to the server in the config, or when
-   interacting with the CLI. Specify the input file containing the keys of your
-   data, and the various locations of the map reduce components. Specify M and
-   R, the number of map and reduce jobs.
+3. Define a job
+```bash
+cp example.job.json job.json
+cp example.keys.txt keys.txt
+```
+~~To learn more about defining jobs, read [here]()~~ Under construction!
 
-4. Hit enter. The CLI will start the job and show you a live view of its progress.
+4. Use the CLI to run the job
+```
+just cli run-job
+```
+Once the job finishes, a json file with the job's name will be written containing information about where each final partition's data is. 
 
-## Status
-The system is functional, but is currently undergoing hardening for better fault tolerance. Expect many changes to the CLI!
+5. (Optional) Download the reduce output
+```
+just cli download <partition name>
+```
+
+## Features
+
+**Fault-tolerance**
+
+A heartbeat mechanism is used to detect failures. When a leader detects a machine has failed, the map job for the index split is rescheduled on a random, live machine. The reduce jobs are similarly rescheduled, using an exponential backoff to wait until the new map job has finished producing data.
+
+**Observability**
+
+OpenTelemetry metrics, traces, and logs are configured. A trace can be followed through from the start of a job with the CLI, to each individual data query in the reduce stage.
+
+**Async support**
+
+Each component of the MapReduce job allows asynchronous execution, not stalling the a job if one input key takes longer than expected.
+
+## Limitations
+
+WASM is often cited as a strong use case for secure environments. The WASM components are run in a non-secure setting here: they can make network requests, allocate memory, and write to the file system. This assumes that you trust the jobs you are running, and only come from within your own organization.
+
