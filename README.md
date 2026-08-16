@@ -62,6 +62,10 @@ Once the job finishes, a json file with the job's name will be written containin
 just cli download <partition name>
 ```
 
+## Data Flow
+
+
+
 ## Features
 
 **Fault-tolerance**
@@ -72,11 +76,30 @@ A heartbeat mechanism is used to detect failures. When a leader detects a machin
 
 OpenTelemetry metrics, traces, and logs are configured. A trace can be followed through from the start of a job with the CLI, to each individual data query in the reduce stage.
 
-**Async support**
+**~~Async support~~**
 
-Each component of the MapReduce job allows asynchronous execution, not stalling the a job if one input key takes longer than expected.
+~~Each component of the MapReduce job allows asynchronous execution, not
+stalling the a job if one input key takes longer than expected.~~ Not all
+language
+bindgen libraries support this, most notably componentize-py's implementation
+does not interface well with wasmtime's. Once the library becomes more mature
+then it will make sense to re-enable the feature.
+
+**Live status**
+
+
+
+## Benchmarks
+
+
 
 ## Limitations
 
 WASM is often cited as a strong use case for secure environments. The WASM components are run in a non-secure setting here: they can make network requests, allocate memory, and write to the file system. This assumes that you trust the jobs you are running, and only come from within your own organization.
 
+## AI usage
+
+- tests
+- local cluster configuration
+- benchmark AMI setup bash scripts
+- minor bug fixes that spanned across different systems

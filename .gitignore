@@ -5,3 +5,7 @@ TODO.md
 benchmarks/data
 *terraform*
 input-data.zip
+.venv
+__pycache__
+output
+*_guest/
