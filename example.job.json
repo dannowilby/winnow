@@ -7,7 +7,7 @@
     "m": 5,
     "r": 2,
     "leader": {
-        "host": "[::1]",
+        "host": "localhost",
         "port": 3000
     }
 }

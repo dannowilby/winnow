@@ -7,23 +7,23 @@ interface logging {
 world reader {
   import logging;
 
-  export read-fn: async func(key: string) -> list<u8>;
+  export read-fn: func(key: string) -> list<u8>;
 }
 
 world mapper {
   import logging;
 
-  export map-fn: async func(key: string, value: list<u8>) -> list<tuple<string, list<u8>>>;
+  export map-fn: func(key: string, value: list<u8>) -> list<tuple<string, list<u8>>>;
 }
 
 world reducer {
   import logging;
 
-  export reduce-fn: async func(key: string, value: list<u8>, acc: list<u8>) -> list<u8>;
+  export reduce-fn: func(key: string, value: list<u8>, acc: list<u8>) -> list<u8>;
 }
 
 world partitioner {
   import logging;
 
-  export partition-fn: async func(key: string, r: u32) -> string;
+  export partition-fn: func(key: string, r: u32) -> string;
 }

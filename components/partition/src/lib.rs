@@ -9,7 +9,7 @@ generate!("partitioner" in "../../wit/world.wit");
 struct PartitionerComponent;
 
 impl Guest for PartitionerComponent {
-    async fn partition_fn(key: String, _r: u32) -> String {
+    fn partition_fn(key: String, _r: u32) -> String {
         // let mut dh = DefaultHasher::new();
         // key.hash(&mut dh);
         // let t = dh.finish() as u32;
