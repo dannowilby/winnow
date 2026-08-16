@@ -8,7 +8,7 @@ packer {
 }
 
 source "amazon-ebs" "ubuntu" {
-  ami_name      = "hadoop-benchmark-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+  ami_name      = "winnow-benchmark-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
   instance_type = "t3.large"
   region        = "us-west-1"
   source_ami_filter {
@@ -21,30 +21,33 @@ source "amazon-ebs" "ubuntu" {
     owners      = ["099720109477"]
   }
   ssh_username = "ubuntu"
+
+  launch_block_device_mappings {
+    device_name           = "/dev/sda1"
+    volume_size           = 45
+    volume_type           = "gp3"
+    delete_on_termination = true
+  }
 }
 
 build {
-  name = "hadoop-benchmark"
+  name = "winnow-benchmark"
   sources = [
     "source.amazon-ebs.ubuntu"
   ]
 
   provisioner "file" {
-    source      = "hadoop-3.5.0.tar.gz"
-    destination = "/tmp/hadoop-3.5.0.tar.gz"
-  }
-
-  provisioner "file" {
     sources = [
-      "core-site.xml",
-      "hdfs-site.xml",
-      "yarn-site.xml",
-      "mapred-site.xml",
       "load_data.sh",
       "run_test.sh",
-      "verify_results.sh",
-      "mapper.py",
-      "reducer.py"
+      "job.json",
+      "cluster.json",
+      "winnow",
+      "winnow_cli",
+      "reducer.wasm",
+      "reader.wasm",
+      "mapper.wasm",
+      "partitioner.wasm"
     ]
     destination = "/tmp/"
   }

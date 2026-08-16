@@ -1,0 +1,13 @@
+{
+    "id": "python-test",
+    "read_src": "./reader.wasm",
+    "map_src": "./mapper.wasm",
+    "partition_src": "./partitioner.wasm",
+    "reduce_src": "./reducer.wasm",
+    "m": 172,
+    "r": 20,
+    "leader": {
+        "host": "localhost",
+        "port": 3000
+    }
+}

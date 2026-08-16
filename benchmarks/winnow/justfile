@@ -1,0 +1,13 @@
+#!/usr/bin/env just --justfile
+
+component-build:
+    cd components && uv run componentize-py -d ../../../wit/world.wit -w mapper componentize mapper -o output/mapper.wasm
+    cd components && uv run componentize-py -d ../../../wit/world.wit -w reducer componentize reducer -o output/reducer.wasm
+    cd components && uv run componentize-py -d ../../../wit/world.wit -w partitioner componentize partitioner -o output/partitioner.wasm
+    cd components && uv run componentize-py -d ../../../wit/world.wit -w reader componentize reader -o output/reader.wasm
+
+component-generate-bindings:
+    cd components && uvx componentize-py -d ../../../wit/world.wit -w mapper bindings mapper_guest
+    cd components && uvx componentize-py -d ../../../wit/world.wit -w reducer bindings reducer_guest
+    cd components && uvx componentize-py -d ../../../wit/world.wit -w partitioner bindings partitioner_guest
+    cd components && uvx componentize-py -d ../../../wit/world.wit -w reader bindings reader_guest

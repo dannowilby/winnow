@@ -4,7 +4,7 @@ set -euxo pipefail   # -e: stop on error (your current script hides failures)
 # --- install java for hadoop ---
 sudo apt-get -y update
 sudo apt-get -y install openjdk-17-jdk
-sudo apt-get -y unzip
+sudo apt-get -y install unzip
 
 # --- install python for mapreduce job ---
 sudo curl -LsSf https://astral.sh/uv/install.sh | sudo sh
@@ -20,6 +20,7 @@ sudo ln -sf "$(sudo uv python find)" /usr/local/bin/python3
 sudo useradd -m -s /bin/bash hadoop
 
 # --- unpack into /opt, not a user home ---
+sudo curl -o /tmp/hadoop-3.5.0.tar.gz https://dlcdn.apache.org/hadoop/common/hadoop-3.5.0/hadoop-3.5.0.tar.gz
 sudo tar xzf /tmp/hadoop-3.5.0.tar.gz -C /opt   # dropped the 'v'; it spams the build log
 sudo ln -s /opt/hadoop-3.5.0 /opt/hadoop
 sudo chown -R hadoop:hadoop /opt/hadoop-3.5.0
@@ -44,6 +45,9 @@ echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' \
 sudo cp /tmp/core-site.xml /tmp/hdfs-site.xml /tmp/yarn-site.xml /tmp/mapred-site.xml \
   /opt/hadoop/etc/hadoop/
 sudo chown -R hadoop:hadoop /opt/hadoop/etc/hadoop
+
+# Download data
+sudo curl -o /home/winnow/data.txt https://verify-winnow-data.s3.us-west-1.amazonaws.com/data.txt
 
 # --- drop in the test files ---
 sudo cp /tmp/load_data.sh /tmp/run_test.sh /tmp/verify_results.sh /tmp/mapper.py /tmp/reducer.py \
