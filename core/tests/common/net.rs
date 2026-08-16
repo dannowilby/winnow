@@ -15,7 +15,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use mapreduce::{
+use winnow_lib::{
     cluster::Host,
     server::{MapReduceServer, MapReduceService, MapReduceServiceClient},
     transport::Connector,

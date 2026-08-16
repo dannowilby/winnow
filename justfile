@@ -2,7 +2,7 @@
 
 # build the server
 build-server *FLAGS:
-    cargo build -p server {{FLAGS}}
+    cargo build -p core {{FLAGS}}
 
 # build wasm components in release
 build-components:
@@ -16,10 +16,10 @@ build *FLAGS: (build-server FLAGS) build-components
 
 # run the cli to start a job
 cli *FLAGS:
-    cargo run -p server --bin mapreduce_cli -- {{FLAGS}}
+    cargo run -p core --bin winnow_cli -- {{FLAGS}}
 
 coverage:
-    cargo llvm-cov nextest -p server
+    cargo llvm-cov nextest -p core
 
 
 run-local-cluster: build

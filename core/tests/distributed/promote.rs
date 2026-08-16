@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tokio::time::{sleep, timeout};
 
-use mapreduce::promote::{PromoteRequest, handle_promote};
+use winnow_lib::promote::{PromoteRequest, handle_promote};
 
 use crate::common::{
     TestNode, context_without_tracing, read_reduce_out, spawn_cluster, test_programs,

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["server", "components/*"]
+members = ["core", "components/*"]
 
 
 [workspace.dependencies]

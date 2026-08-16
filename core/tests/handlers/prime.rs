@@ -1,4 +1,4 @@
-use mapreduce::{
+use winnow_lib::{
     prime::{PrimeRequest, handle_prime},
     storage::{IntermediateData, OutputData},
 };

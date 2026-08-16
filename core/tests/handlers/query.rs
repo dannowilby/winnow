@@ -1,4 +1,4 @@
-use mapreduce::{
+use winnow_lib::{
     cluster::Host,
     query::{QueryRequest, QueryResponse, handle_query},
     storage::{IntermediateData, OutputData},

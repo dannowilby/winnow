@@ -2,7 +2,7 @@
 //! drive its now-`async` export via `.await`, confirming the host correctly
 //! runs an async-lifted guest export.
 
-use mapreduce::wasm::{DefaultWasmEnv, WasmEnv, handle::reduce::ReduceFn};
+use winnow_lib::wasm::{DefaultWasmEnv, WasmEnv, handle::reduce::ReduceFn};
 
 #[tokio::test]
 async fn reduce_component_runs_async() {

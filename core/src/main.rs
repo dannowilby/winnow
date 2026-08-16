@@ -2,15 +2,6 @@
 
 use anyhow::{Context as _, Result};
 use futures::prelude::*;
-use mapreduce::{
-    cluster::{ClusterList, Host},
-    job_lookup::JobLookup,
-    prime::Programs,
-    server::{MapReduceServer, MapReduceService},
-    storage::Storage,
-    transport::TcpConnector,
-    wasm::{DefaultWasmEnv, WasmEnv},
-};
 use serde::Deserialize;
 use std::{
     fs,
@@ -20,6 +11,15 @@ use std::{
 use tarpc::server::{self, Channel, incoming::Incoming};
 use tokio::sync::{RwLock, Semaphore};
 use tracing::info;
+use winnow_lib::{
+    cluster::{ClusterList, Host},
+    job_lookup::JobLookup,
+    prime::Programs,
+    server::{MapReduceServer, MapReduceService},
+    storage::Storage,
+    transport::TcpConnector,
+    wasm::{DefaultWasmEnv, WasmEnv},
+};
 
 /// Mirrors the structure of `cluster.json`.
 #[derive(Debug, Deserialize)]
@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
 
     // init telemetry if enabled
     let telemetry = if telemetry_enabled {
-        Some(mapreduce::telemetry::init("mapreduce-server")?)
+        Some(winnow_lib::telemetry::init("mapreduce-server")?)
     } else {
         tracing_subscriber::fmt()
             .with_env_filter(

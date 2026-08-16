@@ -377,6 +377,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dashmap",
+ "ext-sort",
+ "futures",
+ "indicatif",
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "postcard",
+ "rand 0.10.1",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sysinfo",
+ "tarpc",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "wasmtime",
+ "wasmtime-wasi",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2385,37 +2416,6 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
-]
-
-[[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "dashmap",
- "ext-sort",
- "futures",
- "indicatif",
- "opentelemetry",
- "opentelemetry-appender-tracing",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "postcard",
- "rand 0.10.1",
- "rmp-serde",
- "serde",
- "serde_bytes",
- "serde_json",
- "sysinfo",
- "tarpc",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]

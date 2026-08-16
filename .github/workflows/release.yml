@@ -32,7 +32,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build release binaries
-        run: cargo build -p server --bin mapreduce_bin --bin mapreduce_cli --release
+        run: cargo build -p core --bin winnow --bin winnow_cli --release
 
       - name: Package release archive
         if: runner.os != 'Windows'
@@ -40,8 +40,8 @@ jobs:
         run: |
           release_name="winnow-${GITHUB_REF_NAME}-${RUNNER_OS}-${RUNNER_ARCH}"
           mkdir -p dist/package
-          cp target/release/mapreduce_bin dist/package/winnow-server
-          cp target/release/mapreduce_cli dist/package/winnow
+          cp target/release/winnow dist/package/winnow-server
+          cp target/release/winnow_cli dist/package/winnow
           cp README.md LICENSE dist/package/
           tar -C dist/package -czf "dist/${release_name}.tar.gz" .
 
@@ -51,8 +51,8 @@ jobs:
         run: |
           $releaseName = "winnow-${env:GITHUB_REF_NAME}-${env:RUNNER_OS}-${env:RUNNER_ARCH}"
           New-Item -ItemType Directory -Force dist/package | Out-Null
-          Copy-Item -Path target/release/mapreduce_bin.exe -Destination dist/package/winnow-server.exe
-          Copy-Item -Path target/release/mapreduce_cli.exe -Destination dist/package/winnow.exe
+          Copy-Item -Path target/release/winnow.exe -Destination dist/package/winnow-server.exe
+          Copy-Item -Path target/release/winnow_cli.exe -Destination dist/package/winnow.exe
           Copy-Item -Path README.md, LICENSE -Destination dist/package/
           Compress-Archive -Path dist/package/* -DestinationPath "dist/${releaseName}.zip"
 

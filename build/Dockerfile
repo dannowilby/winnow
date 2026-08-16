@@ -1,10 +1,10 @@
 FROM debian:bookworm-20260518-slim
 
-ARG BIN_PATH=target/debug/mapreduce_bin
+ARG BIN_PATH=target/debug/winnow
 
 WORKDIR /app
 
-COPY ${BIN_PATH} /usr/local/bin/mapreduce_bin
+COPY ${BIN_PATH} /usr/local/bin/winnow
 COPY build/cluster.json ./cluster.json
 
-CMD ["mapreduce_bin"]
+CMD ["winnow"]

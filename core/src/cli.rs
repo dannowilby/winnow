@@ -7,7 +7,11 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use mapreduce::{
+use serde::Deserialize;
+use tarpc::{client::RpcError, tokio_util::sync::CancellationToken};
+use thiserror::Error;
+use tracing::{Instrument, info_span};
+use winnow_lib::{
     cluster::{ClusterList, Host},
     promote::PromoteRequest,
     query::{QueryRequest, QueryResponse},
@@ -15,10 +19,6 @@ use mapreduce::{
     storage::OutputData,
     transport::TcpConnector,
 };
-use serde::Deserialize;
-use tarpc::{client::RpcError, tokio_util::sync::CancellationToken};
-use thiserror::Error;
-use tracing::{Instrument, info_span};
 
 #[derive(Error, Debug)]
 pub enum CliError {
@@ -78,7 +78,7 @@ async fn main() -> Result<(), CliError> {
 
     if cli.t {
         telemetry = Some(
-            mapreduce::telemetry::init("winnow-cli")
+            winnow_lib::telemetry::init("winnow-cli")
                 .map_err(|e| CliError::Other(format!("failed to initialize telemetry: {e}")))?,
         );
     }
@@ -281,7 +281,7 @@ async fn start_job(config: &JobConfig) -> Result<(), CliError> {
             let status_bar = status_bar.clone();
             let map_bar = map_bar.clone();
             let reduce_bar = reduce_bar.clone();
-            move |progress: &mapreduce::job_lookup::Progress| {
+            move |progress: &winnow_lib::job_lookup::Progress| {
                 if progress.primed {
                     status_bar.set_message("Primed");
                 }

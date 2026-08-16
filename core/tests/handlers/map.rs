@@ -1,4 +1,4 @@
-use mapreduce::map::{MapRequest, handle_map};
+use winnow_lib::map::{MapRequest, handle_map};
 
 use crate::common::{context_without_tracing, read_intermediate, test_server};
 

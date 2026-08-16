@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use mapreduce::{cluster::Host, job_lookup::JobLookup, map::MapResponse};
+use winnow_lib::{cluster::Host, job_lookup::JobLookup, map::MapResponse};
 
 fn host(port: u16) -> Host {
     Host {

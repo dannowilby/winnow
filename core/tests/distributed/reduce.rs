@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tokio::time::{sleep, timeout};
 
-use mapreduce::{
+use winnow_lib::{
     cluster::Host,
     map::MapResponse,
     reduce::{ReduceError, ReduceRequest, handle_reduce},
