@@ -92,8 +92,10 @@ async fn main() -> Result<(), CliError> {
         Command::Download { partition } => download(&config, &partition).await,
     };
 
-    if cli.t && telemetry.is_some() {
-        telemetry.unwrap().shutdown();
+    if cli.t
+        && let Some(t) = telemetry
+    {
+        t.shutdown();
     }
 
     result
@@ -171,7 +173,7 @@ async fn check_status(config: &JobConfig) -> Result<(), CliError> {
         .unwrap()
         .query(context(), QueryRequest::JobProgress)
         .await?
-        .map_err(|s| CliError::Other(s))?;
+        .map_err(CliError::Other)?;
 
     let QueryResponse::Progress(progress) = t else {
         println!("Failed to decode progress response");
