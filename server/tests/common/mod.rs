@@ -12,7 +12,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use tokio::sync::RwLock;
+use dashmap::DashMap;
+use tokio::sync::{Mutex, RwLock, Semaphore};
 
 use mapreduce::{
     cluster::{ClusterList, Host},
@@ -38,9 +39,20 @@ pub async fn add_node(net: Arc<InMemoryNet>, list: Vec<Host>, loopback: usize) {
         Arc::new(RwLock::new(Programs::default())),
         DefaultWasmEnv::new().expect("create wasm env"),
         Arc::new(Storage::new("./data")),
+        test_wasm_slots(),
+        test_reduce_locks(),
     );
 
     net.serve(loopback_host, server).await;
+}
+
+/// A generous cap for tests — plenty of headroom so it never gates test behavior.
+fn test_wasm_slots() -> Arc<Semaphore> {
+    Arc::new(Semaphore::new(16))
+}
+
+fn test_reduce_locks() -> Arc<DashMap<String, Arc<Mutex<()>>>> {
+    Arc::new(DashMap::new())
 }
 
 /// Loads the WASM components from `tests/data/` used by every test server.
@@ -78,6 +90,8 @@ pub async fn test_server(name: &str) -> MapReduceServer<DefaultWasmEnv> {
         Arc::new(RwLock::new(test_programs())),
         DefaultWasmEnv::new().expect("create wasm env"),
         Arc::new(test_storage(name)),
+        test_wasm_slots(),
+        test_reduce_locks(),
     )
 }
 
@@ -103,6 +117,8 @@ pub async fn test_served_node(name: &str) -> MapReduceServer<DefaultWasmEnv> {
         Arc::new(RwLock::new(test_programs())),
         DefaultWasmEnv::new().expect("create wasm env"),
         Arc::new(test_storage(name)),
+        test_wasm_slots(),
+        test_reduce_locks(),
     );
 
     net.serve(host, server.clone()).await;
@@ -156,6 +172,8 @@ pub async fn spawn_cluster(name: &str, n: usize) -> (Arc<InMemoryNet>, Vec<TestN
             Arc::new(RwLock::new(test_programs())),
             DefaultWasmEnv::new().expect("create wasm env"),
             Arc::new(test_storage(&format!("{name}-node{i}"))),
+            test_wasm_slots(),
+            test_reduce_locks(),
         );
 
         net.serve(host.clone(), server.clone()).await;
@@ -179,7 +197,7 @@ pub async fn spawn_cluster(name: &str, n: usize) -> (Arc<InMemoryNet>, Vec<TestN
 
 /// Writes a single intermediate `(key, value)` record into `index`'s map output
 /// for `partition`, encoding the value as an rmp `i32`
-pub fn write_intermediate(
+pub async fn write_intermediate(
     server: &MapReduceServer<DefaultWasmEnv>,
     index: usize,
     partition: &str,
@@ -196,6 +214,7 @@ pub fn write_intermediate(
                 value: rmp_serde::to_vec(&value).expect("encode intermediate value"),
             },
         )
+        .await
         .expect("write map output");
 }
 
@@ -203,19 +222,34 @@ pub fn write_intermediate(
 /// per value, all under the partition name as the key. Convenience over
 /// [write_intermediate] for the common single-key case; the reduce wasm sums the
 /// values, so callers can assert the total.
-pub fn seed_map_output(
+///
+/// Written as a single batch via [Storage::write_map_out], the same
+/// write-temp-then-rename path the real map handler uses, so a concurrent
+/// reader (e.g. tests racing a reducer against this seed call) always sees
+/// either none of these records or all of them, never a partial file.
+pub async fn seed_map_output(
     server: &MapReduceServer<DefaultWasmEnv>,
     index: usize,
     partition: &str,
     values: &[i32],
 ) {
-    for value in values {
-        write_intermediate(server, index, partition, partition, *value);
-    }
+    let records = values
+        .iter()
+        .map(|value| IntermediateData {
+            key: partition.to_owned(),
+            value: rmp_serde::to_vec(value).expect("encode intermediate value"),
+        })
+        .collect::<Vec<_>>();
+
+    server
+        .storage
+        .write_map_out(index, partition, &records)
+        .await
+        .expect("write map output");
 }
 
 /// Decodes the intermediate map output based on the WASM components provided in `tests/data/`
-pub fn read_intermediate(
+pub async fn read_intermediate(
     server: &MapReduceServer<DefaultWasmEnv>,
     index: usize,
     partition: &str,
@@ -223,6 +257,7 @@ pub fn read_intermediate(
     let bytes = server
         .storage
         .get_map_out(index, partition.to_owned())
+        .await
         .expect("read map output");
     let mut cursor = Cursor::new(bytes);
     let len = cursor.get_ref().len() as u64;
@@ -239,13 +274,14 @@ pub fn read_intermediate(
 }
 
 /// Decodes the reduce output for a partition into `(key, value)` pairs.
-pub fn read_reduce_out(
+pub async fn read_reduce_out(
     server: &MapReduceServer<DefaultWasmEnv>,
     partition: &str,
 ) -> Vec<(String, i32)> {
     let bytes = server
         .storage
         .get_reduce_out(partition.to_owned())
+        .await
         .expect("read reduce output");
     let mut cursor = Cursor::new(bytes);
     let len = cursor.get_ref().len() as u64;

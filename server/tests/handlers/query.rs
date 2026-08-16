@@ -17,10 +17,12 @@ async fn returns_correct_map_output() {
     server
         .storage
         .append_map_out(4, "even".to_owned(), expected)
+        .await
         .expect("write map output");
     let expected_bytes = server
         .storage
         .get_map_out(4, "even".to_owned())
+        .await
         .expect("read map output");
 
     let response = handle_query(
@@ -48,10 +50,12 @@ async fn returns_correct_reduce_output() {
     server
         .storage
         .append_reduce_out("odd".to_owned(), expected)
+        .await
         .expect("write reduce output");
     let expected_bytes = server
         .storage
         .get_reduce_out("odd".to_owned())
+        .await
         .expect("read reduce output");
 
     let response = handle_query(

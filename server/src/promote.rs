@@ -5,7 +5,7 @@ use std::time::Duration;
 use tarpc::context;
 use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
-use tracing::{Instrument, Span, error, info, info_span, warn_span};
+use tracing::{Instrument, Span, error, info, info_span, warn, warn_span};
 
 use crate::cluster::ActiveConnection;
 use crate::server::{MapReduceServer, context, set_parent};
@@ -45,12 +45,13 @@ pub enum LeaderEvent {
 pub enum PromoteError {}
 
 /// Coordinates all the machines and drive map-reduce to completion.
+#[tracing::instrument(name = "Promote", skip_all)]
 pub async fn handle_promote<W: WasmEnv>(
     server: MapReduceServer<W>,
     ctx: context::Context,
     pr: PromoteRequest,
 ) -> HashMap<String, Host> {
-    let span = info_span!("Promote");
+    let span = tracing::Span::current();
     set_parent(&span, &ctx);
 
     // verify that all connections are up to date
@@ -63,30 +64,32 @@ pub async fn handle_promote<W: WasmEnv>(
     let mut events = JoinSet::new();
     spawn_initial_heartbeats(&mut events, &span, &server).await;
 
-    let mut completed_reduce_jobs: usize = 0;
-    let mut total_reduce_jobs: usize = 0;
-
     let mut sent_initial_reduce_jobs = false;
 
-    let mut completed_map_jobs: usize = 0;
     info!("Spawning map jobs");
-    let total_map_jobs: usize = spawn_initial_map_jobs(&mut events, &span, &server, &pr).await;
+    spawn_initial_map_jobs(&mut events, &span, &server, &pr).await;
 
     while let Some(Ok(event)) = events.join_next().await {
         match event {
             LeaderEvent::MachineFailure(host) => {
-                let (map_job_delta, reduce_job_delta) =
-                    handle_machine_failure(&mut events, &span, &server, &pr, host).await;
-
-                completed_map_jobs = completed_map_jobs.saturating_sub(map_job_delta);
-                completed_reduce_jobs = completed_reduce_jobs.saturating_sub(reduce_job_delta);
+                handle_machine_failure(&mut events, &span, &server, &pr, host).await;
             }
-            LeaderEvent::MapComplete(mr, _host) => {
+            LeaderEvent::MapComplete(mr, host) => {
                 let mut job_lookup = server.job_lookup.write().await;
-                job_lookup.complete_map_job(mr);
-                drop(job_lookup);
 
-                completed_map_jobs += 1;
+                if job_lookup.try_get_host_by_index(mr.index) != Some(&host) {
+                    warn!(
+                        "dropping stale map completion for index {} from {:?}",
+                        mr.index, host
+                    );
+                    continue;
+                }
+
+                job_lookup.complete_map_job(mr);
+
+                let completed_map_jobs = job_lookup.progress.completed_map_jobs;
+                let total_map_jobs = job_lookup.progress.total_map_jobs;
+                drop(job_lookup);
 
                 info!(
                     "Map job finished: {}/{}",
@@ -99,15 +102,25 @@ pub async fn handle_promote<W: WasmEnv>(
 
                 // spawn initial reduce jobs
                 sent_initial_reduce_jobs = true;
-                total_reduce_jobs =
-                    spawn_initial_reduce_jobs(&mut events, &span, &server, &pr).await;
+                spawn_initial_reduce_jobs(&mut events, &span, &server).await;
             }
             LeaderEvent::ReduceComplete(partition, host) => {
-                info!("Reduce job completed on {:?}", host);
                 let mut job_lookup = server.job_lookup.write().await;
+
+                if job_lookup.get_host_by_partition(&partition) != Some(&host) {
+                    warn!(
+                        "dropping stale reduce completion for partition {} from {:?}",
+                        partition, host
+                    );
+                    continue;
+                }
+
+                info!("Reduce job completed on {:?}", host);
                 job_lookup.complete_reduce_job(partition);
 
-                completed_reduce_jobs += 1;
+                let completed_reduce_jobs = job_lookup.progress.completed_reduce_jobs;
+                let total_reduce_jobs = job_lookup.progress.total_reduce_jobs;
+                drop(job_lookup);
 
                 info!(
                     "Completed reduce job: {}/{}",
@@ -161,12 +174,22 @@ async fn prime_cluster<W: WasmEnv>(server: &MapReduceServer<W>, span: &Span, pr:
                 .prime(context(), prime_request)
                 .await;
 
-            if result.is_err() {
-                error!(
-                    "could not prime host ({:?}), see below for details",
-                    connection.host
-                );
-                error!("{}", result.err().unwrap());
+            let failed = match result {
+                Ok(Ok(())) => false,
+                Ok(Err(e)) => {
+                    error!("prime failed on host ({:?}): {}", connection.host, e);
+                    true
+                }
+                Err(e) => {
+                    error!(
+                        "could not prime host ({:?}) at the transport level: {}",
+                        connection.host, e
+                    );
+                    true
+                }
+            };
+
+            if failed {
                 server.cluster.write().await.signal_fail(connection.host);
             }
         }
@@ -200,6 +223,8 @@ async fn spawn_initial_map_jobs<W: WasmEnv>(
 ) -> usize {
     info!("Spawning map jobs");
 
+    let mut count = 0;
+
     // Store index + host and create request futures
     for (index, keys) in split_input_iter(pr.m, &pr.keys) {
         let mut cluster = server.cluster.write().await;
@@ -211,25 +236,27 @@ async fn spawn_initial_map_jobs<W: WasmEnv>(
             .await
             .create_map_job(index, connection.host.clone());
 
-        let request_future = send_map_request(connection.clone(), pr.clone(), index, keys.into())
+        let request_future = send_map_request(connection.clone(), pr.r, index, keys.into())
             .instrument(info_span!(parent: span, "map_request", index));
         events.spawn(request_future);
+        count += 1;
     }
 
-    pr.m as usize
+    count
 }
 
 async fn spawn_initial_reduce_jobs<W: WasmEnv>(
     events: &mut JoinSet<LeaderEvent>,
     span: &Span,
     server: &MapReduceServer<W>,
-    pr: &PromoteRequest,
 ) -> usize {
     info!("Spawning reduce jobs");
 
     let job_lookup = server.job_lookup.write().await;
     let partitions = job_lookup.partition.clone();
     drop(job_lookup);
+
+    let count = partitions.len();
 
     for (partition, indices) in partitions {
         let mut cluster = server.cluster.write().await;
@@ -253,19 +280,18 @@ async fn spawn_initial_reduce_jobs<W: WasmEnv>(
         events.spawn(request_future);
     }
 
-    pr.r as usize
+    count
 }
 
 /// Figures out which map/reduce jobs have failed and resubmits them to live
-/// instances. Returns the number of jobs that failed
-/// ie. (map job failures, reduce job failures)
+/// instances.
 async fn handle_machine_failure<W: WasmEnv>(
     events: &mut JoinSet<LeaderEvent>,
     p_span: &Span,
     server: &MapReduceServer<W>,
     pr: &PromoteRequest,
     host: Host,
-) -> (usize, usize) {
+) {
     let span = warn_span!(parent: p_span, "Machine failure");
 
     let mut cluster = server.cluster.write().await;
@@ -277,7 +303,6 @@ async fn handle_machine_failure<W: WasmEnv>(
 
     // Resend map jobs to new machines
     let lost_map_jobs = job_lookup.get_map_job_indices(host.clone());
-    let delta_map_jobs = lost_map_jobs.len();
     for index in &lost_map_jobs {
         // check if this map job is already running somewhere else
         if job_lookup.get_host_by_index(*index) != &host {
@@ -291,7 +316,7 @@ async fn handle_machine_failure<W: WasmEnv>(
         job_lookup.signal_map_job_failure(*index);
         job_lookup.create_map_job(*index, connection.host.clone());
 
-        let request_future = send_map_request(connection.clone(), pr.clone(), *index, keys.into())
+        let request_future = send_map_request(connection.clone(), pr.r, *index, keys.into())
             .instrument(info_span!(parent: &span, "map_request", index = *index));
         events.spawn(request_future);
     }
@@ -303,7 +328,6 @@ async fn handle_machine_failure<W: WasmEnv>(
         .map(|v| (**v).clone())
         .collect::<Vec<String>>()
         .clone();
-    let delta_reduce_jobs = lost_reduce_jobs.len();
     for partition in lost_reduce_jobs {
         // check if we've already requeued the reduce job
         if job_lookup.get_host_by_partition(&partition).unwrap() != &host {
@@ -326,12 +350,13 @@ async fn handle_machine_failure<W: WasmEnv>(
         .instrument(info_span!(parent: &span, "reduce_request", partition = %partition));
         events.spawn(request_future);
     }
-
-    (delta_map_jobs, delta_reduce_jobs)
 }
 
 async fn heartbeat(connection: ActiveConnection) -> LeaderEvent {
-    sleep(Duration::from_secs(1)).await;
+    // The system seems to be getting swamped, a long timeout helps mitigate
+    // false positive machine failures
+    let heartbeat_timeout = 5;
+    sleep(Duration::from_secs(heartbeat_timeout)).await;
 
     // if the connection has failed somehow already
     if connection.client.is_none() {
@@ -339,7 +364,7 @@ async fn heartbeat(connection: ActiveConnection) -> LeaderEvent {
     }
 
     let check_result = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(heartbeat_timeout),
         connection.clone().client.unwrap().heartbeat(context()),
     )
     .await;
@@ -354,14 +379,14 @@ async fn heartbeat(connection: ActiveConnection) -> LeaderEvent {
 /// a [machine failure](crate::promote::LeaderEvent::MachineFailure).
 async fn send_map_request(
     connection: ActiveConnection,
-    pr: PromoteRequest,
+    r: u32,
     index: usize,
     keys: Vec<String>,
 ) -> LeaderEvent {
     let map_request_payload = MapRequest {
         index,
         key_range: keys,
-        r: pr.r,
+        r,
     };
 
     if connection.client.is_none() {
@@ -384,7 +409,13 @@ async fn send_map_request(
 
             LeaderEvent::MapComplete(response.unwrap(), connection.host.clone())
         }
-        Err(_) => LeaderEvent::MachineFailure(connection.host.clone()),
+        Err(e) => {
+            error!(
+                "map request to {:?} failed at the transport level: {}",
+                connection.host, e
+            );
+            LeaderEvent::MachineFailure(connection.host.clone())
+        }
     }
 }
 
@@ -422,33 +453,94 @@ async fn send_reduce_request(
 
             LeaderEvent::ReduceComplete(partition, connection.host.clone())
         }
-        Err(_) => LeaderEvent::MachineFailure(connection.host.clone()),
+        Err(e) => {
+            error!(
+                "reduce request to {:?} failed at the transport level: {}",
+                connection.host, e
+            );
+            LeaderEvent::MachineFailure(connection.host.clone())
+        }
     }
+}
+
+fn chunk_bounds(n: usize, m: usize, index: usize) -> (usize, usize) {
+    let quotient = n / m;
+    let remainder = n % m;
+
+    let start = index * quotient + index.min(remainder);
+    let size = quotient + if index < remainder { 1 } else { 0 };
+
+    (start, start + size)
 }
 
 fn split_input_iter(m: u32, key_list: &[String]) -> impl Iterator<Item = (usize, &[String])> {
     let n = key_list.len();
-    let segments = n.div_ceil(m as usize);
+    let m = m as usize;
+    let actual = m.min(n);
 
-    key_list.chunks(segments).enumerate()
+    (0..actual).map(move |index| {
+        let (start, end) = chunk_bounds(n, m, index);
+        (index, &key_list[start..end])
+    })
 }
 
 fn get_split_at_index(m: u32, key_list: &[String], index: usize) -> &[String] {
-    let n = key_list.len();
-    let segments = n.div_ceil(m as usize);
-
-    let start = index * segments;
-    let end = (start + segments).min(n);
-
+    let (start, end) = chunk_bounds(key_list.len(), m as usize, index);
     &key_list[start..end]
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn keys(n: usize) -> Vec<String> {
+        (0..n).map(|i| i.to_string()).collect()
+    }
 
     #[test]
-    fn split_input_iter_returns_correct_data() {}
+    fn split_input_iter_returns_correct_data() {
+        // n=369, m=172: doesn't divide evenly, so sizes should differ by at
+        // most one (25 chunks of 3, 147 chunks of 2) rather than the old
+        // behavior of rounding every chunk up to 3 and only producing ~123.
+        let key_list = keys(369);
+        let chunks: Vec<(usize, &[String])> = split_input_iter(172, &key_list).collect();
+
+        assert_eq!(chunks.len(), 172);
+
+        let sizes: Vec<usize> = chunks.iter().map(|(_, c)| c.len()).collect();
+        assert!(sizes.iter().all(|&s| s == 2 || s == 3));
+        assert_eq!(sizes.iter().filter(|&&s| s == 3).count(), 25);
+
+        // indices are sequential and every key is covered exactly once, in order
+        let flattened: Vec<&String> = chunks
+            .iter()
+            .enumerate()
+            .flat_map(|(expected_index, (index, c))| {
+                assert_eq!(*index, expected_index);
+                c.iter()
+            })
+            .collect();
+        assert_eq!(flattened, key_list.iter().collect::<Vec<_>>());
+    }
 
     #[test]
-    fn get_split_at_index_returns_correct_data() {}
+    fn split_input_iter_never_exceeds_available_keys() {
+        // m=172 but only 5 keys available: should produce 5 single-key
+        // chunks, not 172 (most of them empty).
+        let key_list = keys(5);
+        let chunks: Vec<(usize, &[String])> = split_input_iter(172, &key_list).collect();
+
+        assert_eq!(chunks.len(), 5);
+        assert!(chunks.iter().all(|(_, c)| c.len() == 1));
+    }
+
+    #[test]
+    fn get_split_at_index_returns_correct_data() {
+        let key_list = keys(369);
+        let expected: Vec<(usize, &[String])> = split_input_iter(172, &key_list).collect();
+
+        for (index, chunk) in expected {
+            assert_eq!(get_split_at_index(172, &key_list, index), chunk);
+        }
+    }
 }

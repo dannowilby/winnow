@@ -52,6 +52,9 @@ struct JobConfig {
 struct Cli {
     #[command(subcommand)]
     command: Command,
+
+    #[arg(short, long)]
+    t: bool,
 }
 
 #[derive(Subcommand)]
@@ -63,25 +66,35 @@ enum Command {
         /// The partition whose output should be downloaded.
         partition: String,
     },
+    Status,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), CliError> {
-    let telemetry = mapreduce::telemetry::init("winnow-cli")
-        .map_err(|e| CliError::Other(format!("failed to initialize telemetry: {e}")))?;
-
     let cli = Cli::parse();
     let config: JobConfig = serde_json::from_slice(&fs::read("./job.json")?)?;
+
+    let mut telemetry = None;
+
+    if cli.t {
+        telemetry = Some(
+            mapreduce::telemetry::init("winnow-cli")
+                .map_err(|e| CliError::Other(format!("failed to initialize telemetry: {e}")))?,
+        );
+    }
 
     println!();
     println!("Winnow CLI");
 
     let result = match cli.command {
         Command::RunJob => start_job(&config).await,
+        Command::Status => check_status(&config).await,
         Command::Download { partition } => download(&config, &partition).await,
     };
 
-    telemetry.shutdown();
+    if cli.t && telemetry.is_some() {
+        telemetry.unwrap().shutdown();
+    }
 
     result
 }
@@ -140,6 +153,36 @@ fn deserialize_and_print_output(r: Vec<u8>) {
     let output_data: OutputData = rmp_serde::from_slice(&r).expect("should have some actual data");
     let o: i32 = rmp_serde::from_slice(&output_data.1).expect("hm");
     println!("{}: {}", output_data.0, o);
+}
+
+async fn check_status(config: &JobConfig) -> Result<(), CliError> {
+    let cluster = ClusterList::new(
+        vec![(config.leader.domain.clone(), config.leader.port)],
+        0,
+        Arc::new(TcpConnector),
+    )
+    .connect()
+    .await;
+
+    let t = cluster
+        .get_loopback()
+        .client
+        .clone()
+        .unwrap()
+        .query(context(), QueryRequest::JobProgress)
+        .await?
+        .map_err(|s| CliError::Other(s))?;
+
+    let QueryResponse::Progress(progress) = t else {
+        println!("Failed to decode progress response");
+        return Err(CliError::Other(
+            "Wrong/malformed progress enum type returned".to_string(),
+        ));
+    };
+
+    println!("{:?}", progress);
+
+    Ok(())
 }
 
 async fn start_job(config: &JobConfig) -> Result<(), CliError> {

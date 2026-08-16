@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use anyhow::{Context as _, Result};
 use futures::prelude::*;
 use mapreduce::{
@@ -12,26 +14,33 @@ use mapreduce::{
 use serde::Deserialize;
 use std::{
     fs,
-    net::{IpAddr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr},
     sync::Arc,
 };
 use tarpc::server::{self, Channel, incoming::Incoming};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use tracing::info;
 
 /// Mirrors the structure of `cluster.json`.
 #[derive(Debug, Deserialize)]
 struct ClusterConfig {
     members: Vec<Host>,
+
+    /// Whether to collect and export telemetry, defaults to `false`
+    #[serde(default = "default_telemetry")]
+    telemetry: bool,
+}
+
+fn default_telemetry() -> bool {
+    true
 }
 
 async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
     tokio::spawn(fut);
 }
 
-/// Reads `cluster.json`, works out which member *this* process is, and returns
-/// the resulting cluster list together with the address it should bind to.
-fn load_cluster() -> Result<(ClusterList, (IpAddr, u16))> {
+/// Parses the cluster configuration file
+fn load_cluster() -> Result<(ClusterList, (IpAddr, u16), bool)> {
     let config_path = std::env::var("CLUSTER_CONFIG").unwrap_or_else(|_| "cluster.json".to_owned());
     let config: ClusterConfig = serde_json::from_str(
         &fs::read_to_string(&config_path)
@@ -52,7 +61,7 @@ fn load_cluster() -> Result<(ClusterList, (IpAddr, u16))> {
     };
 
     let me = &config.members[loopback];
-    let server_addr = (IpAddr::V6(Ipv6Addr::LOCALHOST), me.port);
+    let server_addr = (IpAddr::V4(Ipv4Addr::UNSPECIFIED), me.port);
 
     info!(
         "starting node {loopback} ({}:{}) of {} cluster member(s)",
@@ -64,18 +73,30 @@ fn load_cluster() -> Result<(ClusterList, (IpAddr, u16))> {
     Ok((
         ClusterList::from_hosts(config.members, loopback, Arc::new(TcpConnector)),
         server_addr,
+        config.telemetry,
     ))
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let telemetry = mapreduce::telemetry::init("mapreduce-server")?;
+    let (cluster_list, server_addr, telemetry_enabled) = load_cluster()?;
 
-    let (cluster_list, server_addr) = load_cluster()?;
+    // init telemetry if enabled
+    let telemetry = if telemetry_enabled {
+        Some(mapreduce::telemetry::init("mapreduce-server")?)
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .init();
+        None
+    };
 
     let mut listener = tarpc::serde_transport::tcp::listen(
         &server_addr,
-        tarpc::tokio_serde::formats::Json::default,
+        tarpc::tokio_serde::formats::Bincode::default,
     )
     .await?;
     listener.config_mut().max_frame_length(usize::MAX);
@@ -85,6 +106,11 @@ async fn main() -> Result<()> {
     let programs = Arc::new(RwLock::new(Programs::default()));
     let wasm_env = DefaultWasmEnv::new().unwrap();
     let storage = Arc::new(Storage::new("./data"));
+
+    // Caps concurrent WASM compile+run across tasks, preventing system overload
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let wasm_slots = Arc::new(Semaphore::new(cpus));
+    let reduce_locks = Arc::new(dashmap::DashMap::new());
 
     listener
         .filter_map(|r| future::ready(r.ok()))
@@ -98,16 +124,20 @@ async fn main() -> Result<()> {
                 programs.clone(),
                 wasm_env.clone(),
                 storage.clone(),
+                wasm_slots.clone(),
+                reduce_locks.clone(),
             );
             channel.execute(server.serve()).for_each(spawn).await
         })
-        .buffer_unordered(10)
+        .buffer_unordered(200)
         .for_each(|_| async {})
         .await;
 
-    storage.clear()?;
+    storage.clear().await?;
 
-    telemetry.shutdown();
+    if let Some(telemetry) = telemetry {
+        telemetry.shutdown();
+    }
 
     Ok(())
 }

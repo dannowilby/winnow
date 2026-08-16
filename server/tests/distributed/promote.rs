@@ -33,28 +33,29 @@ fn promote_request() -> PromoteRequest {
 /// it. Reassignment can move a partition's reduce away from its originally
 /// recorded host, and only the node that finishes writes the output, so scan
 /// them all.
-fn reduce_output(nodes: &[TestNode], partition: &str) -> Vec<(String, i32)> {
+async fn reduce_output(nodes: &[TestNode], partition: &str) -> Vec<(String, i32)> {
     for node in nodes {
         if node
             .server
             .storage
             .get_reduce_out(partition.to_owned())
+            .await
             .is_ok()
         {
-            return read_reduce_out(&node.server, partition);
+            return read_reduce_out(&node.server, partition).await;
         }
     }
     panic!("no node produced reduce output for partition {partition}");
 }
 
 /// Asserts the job produced the full, correct totals for both partitions.
-fn assert_correct_totals(nodes: &[TestNode]) {
+async fn assert_correct_totals(nodes: &[TestNode]) {
     assert_eq!(
-        reduce_output(nodes, "odd"),
+        reduce_output(nodes, "odd").await,
         vec![("odd".to_owned(), ODD_SUM)]
     );
     assert_eq!(
-        reduce_output(nodes, "even"),
+        reduce_output(nodes, "even").await,
         vec![("even".to_owned(), EVEN_SUM)]
     );
 }
@@ -75,7 +76,7 @@ async fn promote_completes_with_no_failures() {
     assert!(reducing.contains_key("odd"));
     assert!(reducing.contains_key("even"));
     // ...with correct totals.
-    assert_correct_totals(&nodes);
+    assert_correct_totals(&nodes).await;
 }
 
 #[tokio::test]
@@ -99,7 +100,7 @@ async fn completes_when_worker_dead_from_start() {
     .expect("promote should finish");
 
     assert_eq!(reducing.len(), 2);
-    assert_correct_totals(&nodes);
+    assert_correct_totals(&nodes).await;
 }
 
 #[tokio::test]
@@ -148,7 +149,7 @@ async fn recomputes_lost_map_output_for_reduce() {
     })
     .await;
 
-    assert_correct_totals(&nodes);
+    assert_correct_totals(&nodes).await;
 }
 
 #[tokio::test]
@@ -175,11 +176,11 @@ async fn leader_survives_when_all_workers_die() {
     assert_eq!(reducing.len(), 2);
     // All work ran on the leader, so its storage holds both partitions' output.
     assert_eq!(
-        read_reduce_out(&nodes[0].server, "odd"),
+        read_reduce_out(&nodes[0].server, "odd").await,
         vec![("odd".to_owned(), ODD_SUM)]
     );
     assert_eq!(
-        read_reduce_out(&nodes[0].server, "even"),
+        read_reduce_out(&nodes[0].server, "even").await,
         vec![("even".to_owned(), EVEN_SUM)]
     );
 }

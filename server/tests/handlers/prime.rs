@@ -28,6 +28,7 @@ async fn prime_resets_storage() {
                 value: rmp_serde::to_vec(&2_i32).expect("encode value"),
             },
         )
+        .await
         .expect("write map output");
     server
         .storage
@@ -38,14 +39,27 @@ async fn prime_resets_storage() {
                 rmp_serde::to_vec(&30_i32).expect("encode value"),
             ),
         )
+        .await
         .expect("write reduce output");
 
     handle_prime(server.clone(), context_without_tracing(), prime_request())
         .await
         .expect("prime succeeds");
 
-    assert!(server.storage.get_map_out(1, "even".to_owned()).is_err());
-    assert!(server.storage.get_reduce_out("even".to_owned()).is_err());
+    assert!(
+        server
+            .storage
+            .get_map_out(1, "even".to_owned())
+            .await
+            .is_err()
+    );
+    assert!(
+        server
+            .storage
+            .get_reduce_out("even".to_owned())
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

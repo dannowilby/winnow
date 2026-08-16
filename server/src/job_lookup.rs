@@ -26,6 +26,9 @@ pub struct JobLookup {
     /// Maps a host to the partition
     pub reducing: HashMap<String, Host>,
 
+    /// Partitions whose reduce job has finished.
+    completed_partitions: HashSet<String>,
+
     pub progress: Progress,
 }
 
@@ -44,9 +47,6 @@ impl JobLookup {
     }
 
     pub fn signal_map_job_failure(&mut self, index: usize) {
-        // Need to check if the job had already completed
-        // if self.is_map_job_complete(partition, index);
-
         if self.is_map_job_complete(index) {
             self.progress.completed_map_jobs -= 1;
         }
@@ -84,13 +84,22 @@ impl JobLookup {
     }
 
     pub fn signal_reduce_job_failure(&mut self, partition: &String) {
+        if self.is_reduce_job_complete(partition) {
+            self.progress.completed_reduce_jobs -= 1;
+            self.completed_partitions.remove(partition);
+        }
         self.reducing.remove(partition);
         self.progress.total_reduce_jobs -= 1;
     }
 
-    /// A stub for now.
-    pub fn complete_reduce_job(&mut self, _partition: String) {
+    /// Records that `partition`'s reduce job has finished.
+    pub fn complete_reduce_job(&mut self, partition: String) {
         self.progress.completed_reduce_jobs += 1;
+        self.completed_partitions.insert(partition);
+    }
+
+    pub fn is_reduce_job_complete(&self, partition: &str) -> bool {
+        self.completed_partitions.contains(partition)
     }
 
     pub fn get_host_by_index(&self, index: usize) -> &Host {

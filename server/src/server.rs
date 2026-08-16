@@ -16,11 +16,12 @@ use crate::{
     storage::Storage,
     wasm::WasmEnv,
 };
+use dashmap::DashMap;
 use opentelemetry::TraceFlags;
 use opentelemetry::trace::{SpanContext, TraceContextExt, TraceState};
 use tarpc::context::{self, Context};
-use tokio::sync::RwLock;
-use tracing::Span;
+use tokio::sync::{Mutex, RwLock, Semaphore};
+use tracing::{Span, error};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[tarpc::service]
@@ -51,6 +52,9 @@ pub struct MapReduceServer<W: WasmEnv> {
     pub wasm_env: W,
 
     pub storage: Arc<Storage>,
+
+    pub wasm_slots: Arc<Semaphore>,
+    pub reduce_locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl<W: WasmEnv> MapReduceServer<W> {
@@ -60,6 +64,8 @@ impl<W: WasmEnv> MapReduceServer<W> {
         programs: Arc<RwLock<Programs>>,
         wasm_env: W,
         storage: Arc<Storage>,
+        wasm_slots: Arc<Semaphore>,
+        reduce_locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
     ) -> Self {
         Self {
             cluster,
@@ -67,6 +73,8 @@ impl<W: WasmEnv> MapReduceServer<W> {
             programs,
             wasm_env,
             storage,
+            wasm_slots,
+            reduce_locks,
         }
     }
 }
@@ -80,18 +88,21 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
     async fn prime(self, ctx: context::Context, pr: PrimeRequest) -> Result<(), String> {
         handle_prime(self, ctx, pr)
             .await
+            .inspect_err(|e| error!(error = %e, source = ?e.source(), "prime failed"))
             .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
     async fn map(self, ctx: context::Context, mp: MapRequest) -> Result<MapResponse, String> {
         handle_map(self, ctx, mp)
             .await
+            .inspect_err(|e| error!(error = %e, source = ?e.source(), "map failed"))
             .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
     async fn reduce(self, ctx: context::Context, rr: ReduceRequest) -> Result<(), String> {
         handle_reduce(self, ctx, rr)
             .await
+            .inspect_err(|e| error!(error = %e, source = ?e.source(), "reduce failed"))
             .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 
@@ -102,6 +113,7 @@ impl<W: WasmEnv> MapReduceService for MapReduceServer<W> {
     async fn query(self, ctx: context::Context, q: QueryRequest) -> Result<QueryResponse, String> {
         handle_query(self, ctx, q)
             .await
+            .inspect_err(|e| error!(error = %e, source = ?e.source(), "query failed"))
             .map_err(|e| format!("{}\n{:?}", e, e.source()))
     }
 }

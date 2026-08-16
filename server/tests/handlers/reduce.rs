@@ -22,7 +22,7 @@ async fn reduces_single_index() {
     let server = test_served_node("reduce-single-index").await;
     let host = loopback();
 
-    seed_map_output(&server, 0, "odd", &[1, 3, 5]);
+    seed_map_output(&server, 0, "odd", &[1, 3, 5]).await;
     server
         .job_lookup
         .write()
@@ -49,7 +49,10 @@ async fn reduces_single_index() {
     .await
     .expect("reduce succeeds");
 
-    assert_eq!(read_reduce_out(&server, "odd"), vec![("odd".to_owned(), 9)]);
+    assert_eq!(
+        read_reduce_out(&server, "odd").await,
+        vec![("odd".to_owned(), 9)]
+    );
 }
 
 #[tokio::test]
@@ -57,8 +60,8 @@ async fn combines_values_across_indices() {
     let server = test_served_node("reduce-multiple-indices").await;
     let host = loopback();
 
-    seed_map_output(&server, 0, "even", &[2, 4]);
-    seed_map_output(&server, 1, "even", &[6, 8]);
+    seed_map_output(&server, 0, "even", &[2, 4]).await;
+    seed_map_output(&server, 1, "even", &[6, 8]).await;
 
     {
         let mut lookup = server.job_lookup.write().await;
@@ -87,7 +90,7 @@ async fn combines_values_across_indices() {
     .expect("reduce succeeds");
 
     assert_eq!(
-        read_reduce_out(&server, "even"),
+        read_reduce_out(&server, "even").await,
         vec![("even".to_owned(), 20)]
     );
 }
@@ -98,9 +101,9 @@ async fn groups_distinct_keys_in_partition() {
     let host = loopback();
 
     // The sorted fold should emit one record per key, ordered by key.
-    write_intermediate(&server, 0, "p", "a", 1);
-    write_intermediate(&server, 0, "p", "b", 10);
-    write_intermediate(&server, 0, "p", "a", 2);
+    write_intermediate(&server, 0, "p", "a", 1).await;
+    write_intermediate(&server, 0, "p", "b", 10).await;
+    write_intermediate(&server, 0, "p", "a", 2).await;
 
     server
         .job_lookup
@@ -130,7 +133,7 @@ async fn groups_distinct_keys_in_partition() {
     .expect("reduce succeeds");
 
     assert_eq!(
-        read_reduce_out(&server, "p"),
+        read_reduce_out(&server, "p").await,
         vec![("a".to_owned(), 3), ("b".to_owned(), 10)]
     );
 }

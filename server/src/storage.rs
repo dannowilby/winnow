@@ -1,8 +1,9 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::{self, BufReader, Read, Write},
+    fs,
+    io::{self, BufReader, Read},
     iter::Peekable,
     marker::PhantomData,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use thiserror::Error;
@@ -11,6 +12,7 @@ use ext_sort::{
     BinaryHeapMerger, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder, RmpExternalChunk,
 };
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 
 pub struct Storage {
     root: String,
@@ -59,128 +61,216 @@ impl Storage {
         }
     }
 
-    pub fn clear(&self) -> Result<(), StorageError> {
-        if std::fs::exists(&self.root)? {
-            std::fs::remove_dir_all(&self.root)?;
+    pub async fn clear(&self) -> Result<(), StorageError> {
+        if tokio::fs::try_exists(&self.root).await? {
+            tokio::fs::remove_dir_all(&self.root).await?;
         }
 
         Ok(())
     }
 
-    pub fn reset(&self) -> Result<(), StorageError> {
-        self.clear()?;
-        std::fs::create_dir_all(&self.root)?;
-        std::fs::create_dir_all("./data")?;
+    pub async fn reset(&self) -> Result<(), StorageError> {
+        self.clear().await?;
+        tokio::fs::create_dir_all(&self.root).await?;
+        tokio::fs::create_dir_all("./data").await?;
         Ok(())
     }
 
-    pub fn append_map_out(
+    pub async fn append_map_out(
         &self,
         index: usize,
         partition: String,
         data: IntermediateData,
     ) -> Result<(), StorageError> {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(format!("{}/int-{}-{}", self.root, partition, index))?;
-
         let encoded = rmp_serde::to_vec(&data)?;
 
-        let _ = file.write(&encoded)?;
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(format!("{}/int-{}-{}", self.root, partition, index))
+            .await?;
+
+        file.write_all(&encoded).await?;
 
         Ok(())
     }
 
-    pub fn get_map_out(&self, index: usize, partition: String) -> Result<Vec<u8>, StorageError> {
-        let data = std::fs::read(format!("{}/int-{}-{}", self.root, partition, index))?;
+    pub async fn write_map_out(
+        &self,
+        index: usize,
+        partition: &str,
+        records: &[IntermediateData],
+    ) -> Result<(), StorageError> {
+        let mut buf = Vec::new();
+        for record in records {
+            buf.extend_from_slice(&rmp_serde::to_vec(record)?);
+        }
+
+        let final_path = format!("{}/int-{}-{}", self.root, partition, index);
+        let tmp_path = format!("{}.tmp-{}", final_path, unique_suffix());
+
+        let mut tmp_file = tokio::fs::File::create(&tmp_path).await?;
+        tmp_file.write_all(&buf).await?;
+        tmp_file.sync_all().await?;
+        drop(tmp_file);
+
+        tokio::fs::rename(&tmp_path, &final_path).await?;
+
+        Ok(())
+    }
+
+    pub async fn get_map_out(
+        &self,
+        index: usize,
+        partition: String,
+    ) -> Result<Vec<u8>, StorageError> {
+        let data = tokio::fs::read(format!("{}/int-{}-{}", self.root, partition, index)).await?;
         Ok(data)
     }
 
-    pub fn append_reduce_in(&self, partition: String, data: Vec<u8>) -> Result<(), StorageError> {
+    pub async fn append_reduce_in(
+        &self,
+        partition: String,
+        data: Vec<u8>,
+    ) -> Result<(), StorageError> {
         let file_path = format!("{}/sor-{}", self.root, partition);
-        let mut f = OpenOptions::new()
+        let mut f = tokio::fs::OpenOptions::new()
             .append(true)
             .create(true)
-            .open(&file_path)?;
-        let _ = f.write(&data)?;
+            .open(&file_path)
+            .await?;
+        f.write_all(&data).await?;
 
         Ok(())
     }
 
-    pub fn clear_reduce_in(&self, partition: &String) -> Result<(), StorageError> {
+    pub async fn sync_reduce_in(&self, partition: &String) -> Result<(), StorageError> {
         let file_path = format!("{}/sor-{}", self.root, partition);
-        let Ok(true) = std::fs::exists(file_path.clone()) else {
+        let f = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&file_path)
+            .await?;
+        f.sync_all().await?;
+        Ok(())
+    }
+
+    pub async fn reduce_in_len(&self, partition: &String) -> Result<u64, StorageError> {
+        let file_path = format!("{}/sor-{}", self.root, partition);
+        let metadata = tokio::fs::metadata(&file_path).await?;
+        Ok(metadata.len())
+    }
+
+    pub async fn clear_reduce_in(&self, partition: &String) -> Result<(), StorageError> {
+        let file_path = format!("{}/sor-{}", self.root, partition);
+        let Ok(true) = tokio::fs::try_exists(&file_path).await else {
             return Ok(());
         };
 
-        std::fs::remove_file(file_path)?;
+        tokio::fs::remove_file(file_path).await?;
 
         Ok(())
     }
 
-    pub fn get_reduce_external_sort_iter(
+    pub async fn get_reduce_external_sort_iter(
         &self,
         partition: String,
     ) -> Result<ReduceSortedIter, StorageError> {
-        let sort_file = std::fs::File::open(format!("{}/sor-{}", self.root, partition))?;
-        let file_size = sort_file.metadata()?.len();
-        let reader = BufReader::new(sort_file).take(file_size);
-        let iter: RmpIter<IntermediateData> = RmpIter {
-            reader,
-            _marker: PhantomData,
-        };
+        let root = self.root.clone();
 
-        let sorter: ExternalSorter<
-            IntermediateData,
-            rmp_serde::decode::Error,
-            LimitedBufferBuilder,
-        > = ExternalSorterBuilder::new()
-            .with_tmp_dir(std::path::Path::new("./data"))
-            .with_buffer(LimitedBufferBuilder::new(100_000, false))
-            .build()?;
+        tokio::task::spawn_blocking(move || {
+            let sort_file = std::fs::File::open(format!("{}/sor-{}", root, partition))?;
+            let file_size = sort_file.metadata()?.len();
+            let reader = BufReader::new(sort_file).take(file_size);
+            let iter: RmpIter<IntermediateData> = RmpIter {
+                reader,
+                _marker: PhantomData,
+            };
 
-        Ok(sorter
-            .sort_by(
-                iter,
-                cmp_intermediate as fn(&IntermediateData, &IntermediateData) -> std::cmp::Ordering,
-            )?
-            .peekable())
+            let sorter: ExternalSorter<
+                IntermediateData,
+                rmp_serde::decode::Error,
+                LimitedBufferBuilder,
+            > = ExternalSorterBuilder::new()
+                .with_tmp_dir(std::path::Path::new("./data"))
+                .with_buffer(LimitedBufferBuilder::new(100_000, false))
+                .build()?;
+
+            Ok(sorter
+                .sort_by(
+                    iter,
+                    cmp_intermediate
+                        as fn(&IntermediateData, &IntermediateData) -> std::cmp::Ordering,
+                )?
+                .peekable())
+        })
+        .await
+        .expect("reduce sort setup task panicked")
     }
 
-    pub fn append_reduce_out(
+    pub async fn append_reduce_out(
         &self,
         partition: String,
         data: OutputData,
     ) -> Result<(), StorageError> {
-        let output_file_path = format!("{}/out-{}", self.root, partition);
-        let mut output_file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(output_file_path)?;
-
         let output = rmp_serde::to_vec(&data)?;
 
-        let _ = output_file.write(&output)?;
+        let output_file_path = format!("{}/out-{}", self.root, partition);
+        let mut output_file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(output_file_path)
+            .await?;
+
+        output_file.write_all(&output).await?;
 
         Ok(())
     }
 
-    pub fn clear_reduce_out(&self, partition: &String) -> Result<(), StorageError> {
+    pub async fn sync_reduce_out(&self, partition: &String) -> Result<(), StorageError> {
         let file_path = format!("{}/out-{}", self.root, partition);
-        let Ok(true) = std::fs::exists(file_path.clone()) else {
+        let f = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&file_path)
+            .await?;
+        f.sync_all().await?;
+        Ok(())
+    }
+
+    pub async fn clear_reduce_out(&self, partition: &String) -> Result<(), StorageError> {
+        let file_path = format!("{}/out-{}", self.root, partition);
+        let Ok(true) = tokio::fs::try_exists(&file_path).await else {
             return Ok(());
         };
 
-        std::fs::remove_file(file_path)?;
+        tokio::fs::remove_file(file_path).await?;
 
         Ok(())
     }
 
-    pub fn get_reduce_out(&self, partition: String) -> Result<Vec<u8>, StorageError> {
-        let data = std::fs::read(format!("{}/out-{}", self.root, partition))?;
+    pub async fn get_reduce_out(&self, partition: String) -> Result<Vec<u8>, StorageError> {
+        let data = tokio::fs::read(format!("{}/out-{}", self.root, partition)).await?;
         Ok(data)
     }
+}
+
+pub async fn advance_reduce_sorted(
+    mut iter: ReduceSortedIter,
+) -> (
+    ReduceSortedIter,
+    Option<Result<IntermediateData, rmp_serde::decode::Error>>,
+    bool,
+) {
+    tokio::task::spawn_blocking(move || {
+        let item = iter.next();
+        let peek_key_differs = match (&item, iter.peek()) {
+            (Some(Ok(current)), Some(Ok(next))) => next.key != current.key,
+            _ => false,
+        };
+
+        (iter, item, peek_key_differs)
+    })
+    .await
+    .expect("reduce sort advance task panicked")
 }
 
 struct RmpIter<T> {
@@ -201,4 +291,13 @@ impl<T: serde::de::DeserializeOwned> Iterator for RmpIter<T> {
 
 fn cmp_intermediate(a: &IntermediateData, b: &IntermediateData) -> std::cmp::Ordering {
     a.key.cmp(&b.key)
+}
+
+/// A value unique enough to keep concurrent [Storage::write_map_out] temp files
+/// (e.g. from a requeued, re-executed map job) from colliding with each other.
+fn unique_suffix() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before unix epoch")
+        .as_nanos()
 }

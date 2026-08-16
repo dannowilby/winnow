@@ -1,8 +1,3 @@
-//! Async is in a rudimentary form and will need to be updated at some point in
-//! the future! Currently, the async components will function asynchronously,
-//! but interleaving of different calls with `await`` breakpoints does not work
-//! yet because the wasm `Accessor` pattern is not configured yet.
-
 mod context;
 pub mod handle;
 
@@ -21,18 +16,13 @@ use wasmtime::{
     Config, Engine, Store,
     component::{Component, Linker},
 };
-use wasmtime_wasi::{ResourceTable, WasiCtxBuilder};
+use wasmtime_wasi::{DirPerms, FilePerms, ResourceTable, WasiCtxBuilder};
 
 mod mapper {
     wasmtime::component::bindgen!({
         world: "mapper",
         path: "../wit/world.wit",
         anyhow: true,
-        // The WIT exports are `async func`. By default wasmtime would generate
-        // the concurrent (`Accessor`-based) calling convention for them; the
-        // `ignore_wit` flag drops the implied `store` flag so we instead get a
-        // plain `call_*_fn(store, ..).await` future. `call_async` still drives
-        // the async component ABI underneath since concurrency support is on.
         exports: { default: async | ignore_wit },
         require_store_data_send: true,
     });
@@ -101,12 +91,7 @@ pub struct DefaultWasmEnv {
 
 impl WasmEnv for DefaultWasmEnv {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let mut config = Config::new();
-        // Enable the component-model async ABI so the guests themselves can use
-        // `async`/`await` and host-side export calls can be `.await`ed.
-        // Concurrency support (required to drive async exports) is enabled by
-        // default once component-model-async is on.
-        config.wasm_component_model_async(true);
+        let config = Config::new();
         let engine = Engine::new(&config)?;
 
         Ok(Self { engine })
@@ -171,10 +156,16 @@ fn pre_instantiate_component(
     // binaries/components. For now, this is good enough.
     Mapper::add_to_linker::<HostAPI, ExtensionData>(&mut linker, |state: &mut HostAPI| state)?;
 
+    // The preopen below requires this directory to already exist on disk;
+    // nothing else in the startup path is guaranteed to have created it (e.g.
+    // handlers invoked directly, bypassing `prime`/`Storage::reset`).
+    std::fs::create_dir_all("sources")?;
+
     let wasi_ctx = WasiCtxBuilder::new()
         .inherit_stdio()
         .inherit_env()
         .inherit_stderr()
+        .preopened_dir("sources", ".", DirPerms::READ, FilePerms::READ)?
         .build();
 
     let store = Store::new(

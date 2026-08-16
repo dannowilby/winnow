@@ -1,7 +1,7 @@
 //! Transport seam between the cluster logic and the wire.
 
 use futures::future::BoxFuture;
-use tarpc::{client, tokio_serde::formats::Json};
+use tarpc::{client, tokio_serde::formats::Bincode};
 
 use crate::cluster::Host;
 use crate::server::MapReduceServiceClient;
@@ -21,7 +21,7 @@ impl Connector for TcpConnector {
         Box::pin(async move {
             let mut transport = tarpc::serde_transport::tcp::connect(
                 format!("{}:{}", host.domain, host.port),
-                Json::default,
+                Bincode::default,
             );
             transport.config_mut().max_frame_length(usize::MAX);
 

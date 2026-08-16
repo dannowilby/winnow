@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tarpc::context;
 use thiserror::Error;
-use tracing::info_span;
 
 use crate::{
     server::{MapReduceServer, set_parent},
@@ -37,15 +36,15 @@ pub enum PrimeError {
 /// Resets the machine for a fresh map-reduce run: wipes the data folder, clears
 /// the global job-lookup state, and stores the supplied programs globally so the
 /// map and reduce endpoints can use them.
+#[tracing::instrument(name = "Prime", skip_all)]
 pub async fn handle_prime<W: WasmEnv>(
     server: MapReduceServer<W>,
     ctx: context::Context,
     pr: PrimeRequest,
 ) -> Result<(), PrimeError> {
-    let span = info_span!("Prime");
-    set_parent(&span, &ctx);
+    set_parent(&tracing::Span::current(), &ctx);
 
-    server.storage.reset()?;
+    server.storage.reset().await?;
 
     // clear the global job-lookup state
     server.job_lookup.write().await.clear();

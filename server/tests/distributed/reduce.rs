@@ -45,8 +45,8 @@ async fn recovers_when_data_host_briefly_down() {
     let (net, nodes) = spawn_cluster("reduce-data-host-briefly-down", 3).await;
 
     // node1 is the data host, node0 the leader, node2 the reducer.
-    seed_map_output(&nodes[1].server, 0, "odd", &[1, 3, 5]);
-    seed_map_output(&nodes[1].server, 1, "odd", &[7, 9]);
+    seed_map_output(&nodes[1].server, 0, "odd", &[1, 3, 5]).await;
+    seed_map_output(&nodes[1].server, 1, "odd", &[7, 9]).await;
     seed_leader_index(&nodes[0], 0, "odd", nodes[1].host.clone()).await;
     seed_leader_index(&nodes[0], 1, "odd", nodes[1].host.clone()).await;
 
@@ -84,7 +84,7 @@ async fn recovers_when_data_host_briefly_down() {
 
     // 1 + 3 + 5 + 7 + 9
     assert_eq!(
-        read_reduce_out(&nodes[2].server, "odd"),
+        read_reduce_out(&nodes[2].server, "odd").await,
         vec![("odd".to_owned(), 25)]
     );
 }
@@ -94,7 +94,7 @@ async fn requeues_on_query_failure() {
     let (_net, nodes) = spawn_cluster("reduce-query-failure", 3).await;
 
     // node1 is the data host, node0 the leader, node2 the reducer.
-    seed_map_output(&nodes[1].server, 0, "odd", &[2, 4, 6]);
+    seed_map_output(&nodes[1].server, 0, "odd", &[2, 4, 6]).await;
 
     // The leader knows the job finished (so the completeness guard passes) but
     // not yet *where* -- `IndexLocation` errors until we record the mapping.
@@ -129,7 +129,7 @@ async fn requeues_on_query_failure() {
 
     // 2 + 4 + 6
     assert_eq!(
-        read_reduce_out(&nodes[2].server, "odd"),
+        read_reduce_out(&nodes[2].server, "odd").await,
         vec![("odd".to_owned(), 12)]
     );
 }
@@ -143,7 +143,7 @@ async fn requeues_until_map_output_complete() {
     let (_net, nodes) = spawn_cluster("reduce-incomplete-map-output", 3).await;
 
     // node1 is the data host, node0 the leader, node2 the reducer.
-    seed_map_output(&nodes[1].server, 0, "odd", &[1, 3, 5]);
+    seed_map_output(&nodes[1].server, 0, "odd", &[1, 3, 5]).await;
 
     // The leader can locate the index (`IndexLocation` resolves) but has not
     // recorded its completion, so the guard rejects the download and requeues.
@@ -177,7 +177,7 @@ async fn requeues_until_map_output_complete() {
 
     // 1 + 3 + 5
     assert_eq!(
-        read_reduce_out(&nodes[2].server, "odd"),
+        read_reduce_out(&nodes[2].server, "odd").await,
         vec![("odd".to_owned(), 9)]
     );
 }
@@ -197,7 +197,7 @@ async fn requeues_when_download_fails() {
     let data_host = nodes[1].server.clone();
     tokio::spawn(async move {
         sleep(Duration::from_millis(200)).await;
-        seed_map_output(&data_host, 0, "odd", &[1, 3, 5]);
+        seed_map_output(&data_host, 0, "odd", &[1, 3, 5]).await;
     });
 
     let result = timeout(
@@ -214,7 +214,7 @@ async fn requeues_when_download_fails() {
 
     // 1 + 3 + 5
     assert_eq!(
-        read_reduce_out(&nodes[2].server, "odd"),
+        read_reduce_out(&nodes[2].server, "odd").await,
         vec![("odd".to_owned(), 9)]
     );
 }
@@ -223,14 +223,14 @@ async fn requeues_when_download_fails() {
 /// failed, reconnects within its retry budget once the leader returns, and
 /// completes the job.
 ///
-/// Ignored by default because the reconnect loop sleeps `2^retry` seconds, so it
-/// pays at least one ~2s backoff before re-checking the connection.
+/// Ignored by default because the reconnect loop sleeps `6^retry` seconds, so it
+/// pays at least one ~6s backoff before re-checking the connection.
 #[tokio::test]
 async fn recovers_when_leader_briefly_down() {
     let (net, nodes) = spawn_cluster("reduce-leader-briefly-down", 3).await;
 
     // node1 is the data host, node0 the leader, node2 the reducer.
-    seed_map_output(&nodes[1].server, 0, "odd", &[1, 3, 5]);
+    seed_map_output(&nodes[1].server, 0, "odd", &[1, 3, 5]).await;
     seed_leader_index(&nodes[0], 0, "odd", nodes[1].host.clone()).await;
 
     // Take the leader down and mark it failed in the reducer's view, so the
@@ -266,7 +266,7 @@ async fn recovers_when_leader_briefly_down() {
 
     // 1 + 3 + 5
     assert_eq!(
-        read_reduce_out(&nodes[2].server, "odd"),
+        read_reduce_out(&nodes[2].server, "odd").await,
         vec![("odd".to_owned(), 9)]
     );
 }
@@ -275,7 +275,7 @@ async fn recovers_when_leader_briefly_down() {
 /// reconnect retries and gives up with a `ConnectionError`.
 ///
 /// Ignored by default because it waits out the real exponential backoff
-/// (2 + 4 + 8 = ~14s) before failing.
+/// (6 + 36 + 216 = ~258s) before failing.
 #[tokio::test]
 async fn fails_when_leader_unrecoverable() {
     let (_net, nodes) = spawn_cluster("reduce-leader-unrecoverable", 3).await;

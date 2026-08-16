@@ -58,7 +58,7 @@ async fn writes_correct_data() {
     .expect("map succeeds");
 
     assert_eq!(
-        read_intermediate(&server, 3, "odd"),
+        read_intermediate(&server, 3, "odd").await,
         vec![
             ("odd".to_owned(), 1),
             ("odd".to_owned(), 3),
@@ -68,7 +68,7 @@ async fn writes_correct_data() {
         ]
     );
     assert_eq!(
-        read_intermediate(&server, 3, "even"),
+        read_intermediate(&server, 3, "even").await,
         vec![
             ("even".to_owned(), 2),
             ("even".to_owned(), 4),

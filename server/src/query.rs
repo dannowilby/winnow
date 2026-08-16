@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tarpc::context;
 use thiserror::Error;
-use tracing::info_span;
+use tracing::error;
 
 use crate::{
     cluster::Host,
@@ -44,13 +44,14 @@ pub enum QueryError {
     IndexNotFound(usize),
 }
 
+#[tracing::instrument(name = "Query", skip_all)]
 pub async fn handle_query<W: WasmEnv>(
     server: MapReduceServer<W>,
     ctx: context::Context,
     q: QueryRequest,
 ) -> Result<QueryResponse, QueryError> {
-    let span = info_span!("Query");
-    set_parent(&span, &ctx);
+    set_parent(&tracing::Span::current(), &ctx);
+
     match q {
         QueryRequest::IsMapJobComplete(index) => Ok(QueryResponse::Status(
             server.job_lookup.read().await.is_map_job_complete(index),
@@ -61,12 +62,23 @@ pub async fn handle_query<W: WasmEnv>(
         )),
 
         QueryRequest::DownloadMapOutput(index, partition) => {
-            // TODO: check that the job has completed first
-            let data = server.storage.get_map_out(index, partition)?;
+            let data = server
+                .storage
+                .get_map_out(index, partition.clone())
+                .await
+                .inspect_err(
+                    |e| error!(index, partition = %partition, error = %e, "DownloadMapOutput failed"),
+                )?;
             Ok(QueryResponse::Data(data))
         }
         QueryRequest::DownloadReduceOutput(partition) => {
-            let data = server.storage.get_reduce_out(partition)?;
+            let data = server
+                .storage
+                .get_reduce_out(partition.clone())
+                .await
+                .inspect_err(
+                    |e| error!(partition = %partition, error = %e, "DownloadReduceOutput failed"),
+                )?;
             Ok(QueryResponse::Data(data))
         }
         QueryRequest::IndexLocation(index) => {
@@ -76,7 +88,8 @@ pub async fn handle_query<W: WasmEnv>(
                 .await
                 .try_get_host_by_index(index)
                 .cloned()
-                .ok_or(QueryError::IndexNotFound(index))?;
+                .ok_or(QueryError::IndexNotFound(index))
+                .inspect_err(|e| error!(index, error = %e, "IndexLocation failed"))?;
             Ok(QueryResponse::Host(host))
         }
     }

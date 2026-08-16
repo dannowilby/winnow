@@ -1,9 +1,8 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use tarpc::context;
 use thiserror::Error;
-use tracing::info_span;
 
 use crate::{
     server::{MapReduceServer, set_parent},
@@ -40,14 +39,21 @@ pub enum MapError {
     StorageError(#[from] StorageError),
 }
 
+#[tracing::instrument(name = "Map", skip_all)]
 pub async fn handle_map<W: WasmEnv>(
     server: MapReduceServer<W>,
     ctx: context::Context,
     mp: MapRequest,
 ) -> Result<MapResponse, MapError> {
-    let span = info_span!("Map");
-    set_parent(&span, &ctx);
+    set_parent(&tracing::Span::current(), &ctx);
+
     tracing::info!(trace = %ctx.trace_id(), "received map");
+
+    let _permit = server
+        .wasm_slots
+        .acquire()
+        .await
+        .expect("wasm_slots semaphore should not be closed");
 
     // We have to create the environment in the thread that builds and
     // executes the wasm code. wasmtime constructs do not mostly implement `Send`
@@ -60,7 +66,7 @@ pub async fn handle_map<W: WasmEnv>(
         .load_partition_binary(&programs.partition_src)
         .await?;
 
-    let mut seen_partitions = HashSet::<String>::new();
+    let mut partition_buffers = HashMap::<String, Vec<IntermediateData>>::new();
 
     for key in mp.key_range {
         let value = reader.read(&key).await?;
@@ -69,20 +75,24 @@ pub async fn handle_map<W: WasmEnv>(
         for (out_key, value) in kvs {
             let partition = partitioner.partition(&out_key, mp.r).await?;
 
-            server.storage.append_map_out(
-                mp.index,
-                partition.clone(),
-                IntermediateData {
+            partition_buffers
+                .entry(partition)
+                .or_default()
+                .push(IntermediateData {
                     key: out_key,
                     value,
-                },
-            )?;
-
-            seen_partitions.insert(partition);
+                });
         }
     }
 
-    let seen_partitions = seen_partitions.into_iter().collect::<Vec<String>>();
+    for (partition, records) in &partition_buffers {
+        server
+            .storage
+            .write_map_out(mp.index, partition, records)
+            .await?;
+    }
+
+    let seen_partitions = partition_buffers.into_keys().collect::<Vec<String>>();
 
     Ok(MapResponse {
         index: mp.index,
