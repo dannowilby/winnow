@@ -49,7 +49,7 @@ This will run three of winnow's MapReduce nodes along with an instance for Grafa
 cp example.job.json job.json
 cp example.keys.txt keys.txt
 ```
-~~To learn more about defining jobs, read [here]()~~ Under construction!
+More information is contained in the [AUTHORING_COMPONENTS](./docs/AUTHORING_COMPONENTS.md) guide.
 
 4. Use the CLI to run the job
 ```
@@ -62,9 +62,9 @@ Once the job finishes, a json file with the job's name will be written containin
 just cli download <partition name>
 ```
 
-## Data Flow
+## Installation
 
-
+The `winnow` binary is a deployable artifact that will automatically run a singular Winnow server. The binary requires a `cluster.json` file to run, supplying telemetry configuration and cluster membership. An example has been provided in `example.cluster.json`.
 
 ## Features
 
@@ -76,22 +76,18 @@ A heartbeat mechanism is used to detect failures. When a leader detects a machin
 
 OpenTelemetry metrics, traces, and logs are configured. A trace can be followed through from the start of a job with the CLI, to each individual data query in the reduce stage.
 
-**~~Async support~~**
+**Async support (non-WASM)**
 
-~~Each component of the MapReduce job allows asynchronous execution, not
-stalling the a job if one input key takes longer than expected.~~ Not all
-language
-bindgen libraries support this, most notably componentize-py's implementation
-does not interface well with wasmtime's. Once the library becomes more mature
-then it will make sense to re-enable the feature.
+Unfortunately, WASM-level async (asynchronous calls within a WASM component) proved too immature to successfully work with Python's WASM component compiler. As such, multiple requests are handled asynchronously, but not the UDFs themselves.
 
-**Live status**
+**Live status updates**
 
+Like Hadoop Streaming, Winnow provides a progress bar of the map and reduce phases of the program's completion.
 
 
 ## Benchmarks
 
-
+Benchmarks have been performed and discussed in the [BENCHMARKS](./docs/BENCHMARKS.md) document. The benchmarks focusing on comparing the wall-clock times of Hadoop Streaming and Winnow.
 
 ## Limitations
 
@@ -99,7 +95,4 @@ WASM is often cited as a strong use case for secure environments. The WASM compo
 
 ## AI usage
 
-- tests
-- local cluster configuration
-- benchmark AMI setup bash scripts
-- minor bug fixes that spanned across different systems
+Claude Code was used to create and debug tests, create the local cluster docker compose configuration, refine the machine images used for benchmarking, and fix small bugs that only surfaced in benchmarks.
